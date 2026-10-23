@@ -76,6 +76,10 @@ router
           .where('id', id.id)
           .use(middleware.can(['learners.read']))
         router
+          .post('learners/:id/name', [TutorController, 'renameLearner'])
+          .where('id', id.id)
+          .use(middleware.can(['learners.read', 'learners.pii.read', 'learners.manage']))
+        router
           .post('learners/:id/reveal', [TutorController, 'revealLearner'])
           .where('id', id.id)
           .use(middleware.can(['learners.read', 'learners.pii.read']))

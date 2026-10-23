@@ -1,4 +1,5 @@
 import vine from '@vinejs/vine'
+import { LEARNER_NAME } from '#helpers/learner_name'
 
 /**
  * Every sensitive read and every write asks "why?". The reason is stored in the audit
@@ -56,6 +57,19 @@ export const reissueValidator = vine.compile(vine.object({ send_email: vine.bool
 
 export const renameValidator = vine.compile(
   vine.object({ name: vine.string().trim().minLength(2).maxLength(120) })
+)
+
+export const learnerNameValidator = vine.compile(
+  vine.object({
+    name: vine
+      .string()
+      .trim()
+      .minLength(2)
+      .maxLength(60)
+      .regex(LEARNER_NAME)
+      .transform((v) => v.replace(/\s+/g, ' ')),
+    reason: reason(),
+  })
 )
 
 export const rolesValidator = vine.compile(

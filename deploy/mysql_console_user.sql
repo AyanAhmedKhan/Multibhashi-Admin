@@ -21,6 +21,8 @@ GRANT INSERT, UPDATE ON multibhashi.ai_tutor_learner_memories TO 'mb_console'@'%
 GRANT DELETE ON multibhashi.ai_tutor_session_summaries TO 'mb_console'@'%';
 GRANT INSERT, UPDATE ON multibhashi.course_lesson_package_bookings TO 'mb_console'@'%';
 GRANT INSERT, UPDATE ON multibhashi.course_lesson_subscriptions TO 'mb_console'@'%';
+-- Learner name fix (the app's own profile screen writes the same column). Nothing else on users.
+GRANT UPDATE (name, updated_at) ON multibhashi.users TO 'mb_console'@'%';
 
 -- The console's own tables.
 GRANT INSERT, UPDATE, DELETE ON multibhashi.console_users TO 'mb_console'@'%';

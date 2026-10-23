@@ -75,7 +75,7 @@ export const MODULES: ModuleDef[] = [
       p('learners.read', 'Search learners (contact details masked)', 'read', true),
       p('learners.pii.read', 'Reveal phone and email', 'sensitive', true),
       p('learners.export', 'Export a learner’s data (access request)', 'critical', true),
-      p('learners.manage', 'Edit or block learners', 'write', false),
+      p('learners.manage', 'Edit learners (name; blocking comes later)', 'write', true),
     ],
   },
   {

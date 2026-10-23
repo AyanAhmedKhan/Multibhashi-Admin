@@ -4,14 +4,14 @@ import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { Search } from 'lucide-react'
 import { api, type Paginated } from '../../lib/api'
 import { fmtDateTime, fmtInt, fmtMinutes } from '../../lib/format'
-import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { useAuth } from '../../lib/auth'
-import { initials } from '../admin/StaffPage'
+import { LearnerAvatar, LearnerName, type NameSource } from '../../components/learner-name'
 import { Card, Empty, ErrorNote, Input, PageHeader, Pagination, Spinner, Table, Td } from '../../components/ui'
 
 interface LearnerRow {
   id: number
   name: string | null
+  nameSource: NameSource
   email: string | null
   phone: string | null
   createdAt: string | null
@@ -61,11 +61,9 @@ export function LearnersPage() {
                 <tr key={l.id} className="border-b transition-colors hover:bg-muted/50">
                   <Td>
                     <Link to={`/learners/${l.id}`} className="flex items-center gap-3">
-                      <Avatar className="size-8">
-                        <AvatarFallback className="bg-accent text-xs font-semibold text-accent-foreground">{l.name ? initials(l.name) : '#'}</AvatarFallback>
-                      </Avatar>
+                      <LearnerAvatar name={l.name} className="size-8" textClassName="text-xs" />
                       <span>
-                        <span className="block font-medium hover:underline">{l.name ?? 'Unnamed'}</span>
+                        <LearnerName name={l.name} source={l.nameSource} className="font-medium hover:underline" />
                         <span className="block text-xs text-muted-foreground">#{l.id}</span>
                       </span>
                     </Link>

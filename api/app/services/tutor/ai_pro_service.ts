@@ -55,7 +55,18 @@ const toBool = (value: unknown) => value === true || value === 1 || value === '1
 class AiProService {
   async catalog(courseId?: number) {
     if (!courseId) {
-      const courses = await db.from('courses').select('id', 'name').orderBy('name').limit(500)
+      // `courses.title` is the course name in the monolith schema (there is no `name`).
+      // Only courses with live, levelled lessons can be granted.
+      const courses = await db
+        .from('courses')
+        .whereNotNull('title')
+        .whereNot('title', '')
+        .whereExists((q) =>
+          q.from('course_lessons as l').whereRaw('l.course_id = courses.id').where('l.is_deleted', 0).whereNotNull('l.course_level')
+        )
+        .select('id', 'title as name')
+        .orderBy('title')
+        .limit(500)
       return { courses }
     }
     const [levels, packages] = await Promise.all([
@@ -392,7 +403,7 @@ class AiProService {
         .where('b.has_ai_tutor', 1)
         .orderBy('b.id', 'desc')
         .limit(50)
-        .select('b.id', 'b.course_id', 'c.name as course_name', 'b.level_name', 'b.package_name', 'b.expire_on', 'b.course_booking_id', 'b.selling_price', 'b.ai_chat_duration', 'b.created_at'),
+        .select('b.id', 'b.course_id', 'c.title as course_name', 'b.level_name', 'b.package_name', 'b.expire_on', 'b.course_booking_id', 'b.selling_price', 'b.ai_chat_duration', 'b.created_at'),
       db
         .from('console_ai_pro_grants as g')
         .leftJoin('console_users as u', 'u.id', 'g.granted_by')

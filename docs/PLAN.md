@@ -117,7 +117,7 @@ Phase 1 is built; later phases are listed in the sidebar as "Coming next".
 | 1 | **Overview** | KPI tiles, classes per day, top lessons, pending approvals | home | **1 ✓** |
 | 2 | **Insights** | Users & growth · Screens & content · AI tutor usage · Cost & margin | analytics (leads only) | **1 ✓** |
 | 3 | **AI Tutor** | Live classes (end a class) · Classes (detail, transcript, minutes ±) · Minutes ledger · Free-grant abuse view | CLI `ai:grant-minutes` | **1 ✓** |
-| 4 | **Learners** | Search · Full profile (account, languages, devices, screens, bookings and plans) · AI Pro (give/extend/end) · Tutor memory (view/erase) · Data export | users, userprofile | **1 ✓** (edit/block in 2) |
+| 4 | **Learners** | Search · Full profile (account, languages, devices, screens, bookings and plans) · Set a missing name · AI Pro (give/extend/end) · Tutor memory (view/erase) · Data export | users, userprofile | **1 ✓** (block in 2) |
 | 5 | **Administration** | Approvals · Staff · Roles & permissions · Audit log · Security policy · System health · My account | team, dashboard_controls | **1 ✓** |
 | 6 | CRM & Leads | Leads (own/team/all), assign/transfer, remarks, renewals, recordings, sources/statuses | leads, status, contactus | 2 |
 | 7 | Bookings & Sales | Course/session/package/IELTS bookings, subscriptions, coupons, offers, invoices | bookings, coupon, offers, subscription, sessions_testing | 2 |
@@ -429,3 +429,4 @@ Each phase ships on its own and switches the matching old pages off.
 5. **Domain and network**: `admin.multibhashi.com`, and whether to require office/VPN IPs.
 6. **Phase 2 order**: suggested CRM → Bookings/Finance → Teachers → Live Classes.
 7. **Sarvam STT streams the whole class**, not just learner speech (SDK 1.4.7 keeps the room audio feed on): about ₹0.50 per class minute where ~₹0.18 would do. Fixing it is an agent change (raised by the observability session).
+8. **Learner names**: phone sign-ups are saved with the placeholder name "User", and the app's profile screen locks the name field once it isn't empty, so learners can't fix it. The console shows these as "No name yet" (or the name from a CRM enquiry), and staff with `learners.manage` can set the name. The lasting fix is in the app: ask for a name at sign-up, and treat "User" as empty on the profile screen.

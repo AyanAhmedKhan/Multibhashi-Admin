@@ -44,6 +44,7 @@ async function cleanup() {
   await db.from('course_lessons').where('course_id', 9101).delete()
   await db.from('course_lesson_packages').where('course_id', 9101).delete()
   await db.from('courses').where('id', 9101).delete()
+  await db.from('direct_leads').where('user_id', LEARNER).delete()
   await db.from('ai_tutor_time_logs').where('user_id', LEARNER).delete()
   await db.from('ai_tutor_session_summaries').where('user_id', LEARNER).delete()
   await db.from('ai_tutor_learner_memories').where('user_id', LEARNER).delete()
@@ -321,12 +322,19 @@ test.group('Console end to end', (group) => {
     const ops = await signIn(client, 'pro-ops@test.local', o.user.id)
 
     // A course with 3 lessons, one PDF learn card each, and an AI package
-    await db.table('courses').insert({ id: 9101, name: 'Test course' })
+    await db.table('courses').insert({ id: 9101, title: 'Test course' })
     await db.table('course_lesson_packages').insert({ course_id: 9101, name: 'Premium', status: 'active', has_ai_tutor: 1, ai_chat_duration: 30 })
     for (let n = 1; n <= 3; n++) {
       await db.table('course_lessons').insert({ course_id: 9101, name: `L${n}`, quiz_id: 910_000 + n, course_level: 'A1.1', lesson_number: n, is_deleted: 0 })
       await db.table('quiz_questions').insert({ quiz_id: 910_000 + n, type_code: 'LEARN_CARD', sub_type_code: 'PDF' })
     }
+    // The course picker lists titled courses that have lessons
+    const catalog = await as(client, ops, 'get', '/api/tutor/ai-pro/catalog')
+    catalog.assertStatus(200)
+    assert.deepInclude(catalog.body().courses, { id: 9101, name: 'Test course' })
+    const levels = await as(client, ops, 'get', '/api/tutor/ai-pro/catalog?courseId=9101')
+    assert.deepEqual(levels.body().levels, [{ level: 'A1.1', lessons: 3, first: 1, last: 3 }])
+
     const body = {
       course_id: 9101,
       level_name: 'A1.1',
@@ -570,6 +578,43 @@ test.group('Console end to end', (group) => {
       await setMfaMethod('totp')
     }
   }).timeout(60_000)
+
+  test('learner names: the app placeholder, a CRM enquiry name, and renaming', async ({ client, assert }) => {
+    const a = await invitedUser('names-owner@test.local', 'super_admin')
+    await completeSetup(client, a.token)
+    const admin = await signIn(client, 'names-owner@test.local', a.user.id)
+    const s = await invitedUser('names-support@test.local', 'support_agent')
+    await completeSetup(client, s.token)
+    const support = await signIn(client, 'names-support@test.local', s.user.id)
+
+    // Phone sign-ups keep the app's placeholder "User": shown as no name
+    await db.from('users').where('id', LEARNER).update({ name: 'User' })
+    const placeholder = await as(client, admin, 'get', `/api/learners/${LEARNER}`)
+    placeholder.assertStatus(200)
+    assert.isNull(placeholder.body().learner.name)
+    assert.isNull(placeholder.body().learner.nameSource)
+
+    // A CRM enquiry with a real name fills the gap, marked as such
+    await db.table('direct_leads').insert({ user_id: LEARNER, name: 'User', phone: '9000002001' })
+    await db.table('direct_leads').insert({ user_id: LEARNER, name: 'Priya Sharma', phone: '9000002001' })
+    const fromLead = await as(client, admin, 'get', `/api/learners?q=${LEARNER}`)
+    assert.equal(fromLead.body().data[0].name, 'Priya Sharma')
+    assert.equal(fromLead.body().data[0].nameSource, 'enquiry')
+
+    // Renaming needs learners.manage; the name is validated, tidied and audited
+    const denied = await as(client, support, 'post', `/api/learners/${LEARNER}/name`).json({ name: 'Priya Sharma', reason: 'learner asked (test)' })
+    denied.assertStatus(403)
+    const bad = await as(client, admin, 'post', `/api/learners/${LEARNER}/name`).json({ name: '<b>Priya</b>', reason: 'learner asked (test)' })
+    bad.assertStatus(422)
+    const renamed = await as(client, admin, 'post', `/api/learners/${LEARNER}/name`).json({ name: '  Priya   Sharma ', reason: 'Learner told support on a call (test)' })
+    renamed.assertStatus(200)
+    assert.equal((await db.from('users').where('id', LEARNER).first()).name, 'Priya Sharma')
+    const after = await as(client, admin, 'get', `/api/learners/${LEARNER}`)
+    assert.equal(after.body().learner.nameSource, 'account')
+    const audit = await db.from('console_audit_logs').where('action', 'learners.renamed').where('target_id', String(LEARNER)).orderBy('id', 'desc').first()
+    assert.equal(audit.reason, 'Learner told support on a call (test)')
+    await db.from('users').where('id', LEARNER).update({ name: 'Console Test Learner' })
+  })
 
   test('wrong passwords lock the account; the message never reveals whether it exists', async ({ client, assert }) => {
     const b = await invitedUser('locked@test.local', 'auditor')

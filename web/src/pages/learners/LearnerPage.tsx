@@ -1,22 +1,21 @@
 import { useState, type ReactNode } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Activity, Brain, CalendarDays, Clock, Download, Lock, Smartphone, Timer, Trash2 } from 'lucide-react'
+import { Activity, Brain, CalendarDays, Clock, Download, Lock, PenLine, Smartphone, Timer, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
-import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { api } from '../../lib/api'
 import { useAuth } from '../../lib/auth'
 import { fmtAgo, fmtDateTime, fmtInt, fmtMinutes } from '../../lib/format'
 import { useReason } from '../../components/dialogs'
-import { Badge, Button, Card, Empty, ErrorNote, KeyValue, Spinner, Stat, Table, Tabs, Td } from '../../components/ui'
+import { Badge, Button, Card, Empty, ErrorNote, Field, Input, KeyValue, Modal, Spinner, Stat, Table, Tabs, Td, Textarea } from '../../components/ui'
 import { statusTone } from '../tutor/ClassesPage'
-import { initials } from '../admin/StaffPage'
+import { LearnerAvatar, LearnerName, type NameSource } from '../../components/learner-name'
 import { AiProPanel } from './AiProPanel'
 
 type Row = Record<string, unknown>
 
 interface LearnerDetail {
-  learner: { id: number; name: string | null; email: string | null; phone: string | null; createdAt: string | null; masked: boolean }
+  learner: { id: number; name: string | null; nameSource: NameSource; email: string | null; phone: string | null; createdAt: string | null; masked: boolean }
   profile: {
     account: Row | null
     details: Row | null
@@ -82,6 +81,54 @@ function RowsTable({ rows, empty }: { rows: Row[]; empty: string }) {
 
 type TabKey = 'overview' | 'profile' | 'classes' | 'bookings' | 'memory'
 
+/** Sets the account name: the column the app's profile screen writes, so the app and the tutor use it too. */
+function RenameDialog({ learnerId, current, onClose, onDone }: { learnerId: number; current: string | null; onClose: () => void; onDone: () => Promise<void> }) {
+  const [name, setName] = useState(current ?? '')
+  const [reason, setReason] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<unknown>(null)
+  const ready = name.trim().length >= 2 && reason.trim().length >= 5
+  const save = async () => {
+    setBusy(true)
+    setError(null)
+    try {
+      await api.post(`learners/${learnerId}/name`, { name, reason })
+      toast.success('Name saved')
+      await onDone()
+    } catch (e) {
+      setError(e)
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <Modal
+      open
+      title={current ? 'Edit learner name' : 'Set learner name'}
+      description="Saved on the learner’s account: the app and the AI tutor show it from the next screen they open."
+      onClose={onClose}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button variant="primary" disabled={!ready || busy} onClick={save}>
+            Save name
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-4">
+        <Field label="Full name" hint="Letters, spaces, dots, apostrophes and hyphens.">
+          {(fid) => <Input id={fid} value={name} maxLength={60} autoFocus onChange={(e) => setName(e.target.value)} placeholder="e.g. Priya Sharma" />}
+        </Field>
+        <Field label="Reason">{(fid) => <Textarea id={fid} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Learner gave their name on the support call, ticket 4321" />}</Field>
+        <ErrorNote error={error} />
+      </div>
+    </Modal>
+  )
+}
+
 export function LearnerPage() {
   const { id } = useParams()
   const { can } = useAuth()
@@ -90,11 +137,12 @@ export function LearnerPage() {
   const detail = useQuery({ queryKey: ['learner', id], queryFn: () => api.get<LearnerDetail>(`learners/${id}`) })
   const [memory, setMemory] = useState<Memory | null>(null)
   const [tab, setTab] = useState<TabKey>('overview')
+  const [renaming, setRenaming] = useState(false)
 
   if (detail.isLoading) return <Spinner rows={8} />
   if (detail.error || !detail.data) return <ErrorNote error={detail.error} />
   const { learner, stats, profile } = detail.data
-  const display = learner.name || `Learner #${learner.id}`
+  const canRename = can('learners.manage') && can('learners.pii.read') && !learner.masked
 
   const viewMemory = () =>
     ask({
@@ -148,11 +196,16 @@ export function LearnerPage() {
     <>
       <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
         <div className="flex min-w-0 items-center gap-4">
-          <Avatar className="size-14">
-            <AvatarFallback className="bg-accent text-lg font-semibold text-accent-foreground">{learner.name ? initials(learner.name) : '#'}</AvatarFallback>
-          </Avatar>
+          <LearnerAvatar name={learner.name} className="size-14" textClassName="text-lg" />
           <div className="min-w-0">
-            <h1 className="truncate text-2xl font-semibold tracking-tight">{display}</h1>
+            <h1 className="flex flex-wrap items-center gap-2 text-2xl font-semibold tracking-tight">
+              <LearnerName name={learner.name} source={learner.nameSource} />
+              {canRename && (
+                <Button size="sm" variant="ghost" icon={<PenLine />} onClick={() => setRenaming(true)}>
+                  {learner.nameSource === 'account' ? 'Edit name' : 'Set name'}
+                </Button>
+              )}
+            </h1>
             <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
               <span>#{learner.id}</span>
               {learner.phone && <span className="tabular">{learner.phone}</span>}
@@ -185,6 +238,19 @@ export function LearnerPage() {
         />
       </div>
 
+      {renaming && (
+        <RenameDialog
+          learnerId={learner.id}
+          current={learner.name}
+          onClose={() => setRenaming(false)}
+          onDone={async () => {
+            setRenaming(false)
+            await queryClient.invalidateQueries({ queryKey: ['learner', id] })
+            await queryClient.invalidateQueries({ queryKey: ['learners'] })
+          }}
+        />
+      )}
+
       <Tabs value={tab} onChange={setTab} items={tabs} />
 
       {tab === 'overview' && (
@@ -192,7 +258,7 @@ export function LearnerPage() {
           <Card title="Contact">
             <KeyValue
               items={[
-                ['Name', learner.name ?? '—'],
+                ['Name', <LearnerName name={learner.name} source={learner.nameSource} />],
                 ['Phone', <span className="tabular">{learner.phone ?? '—'}</span>],
                 ['Email', learner.email ?? '—'],
                 ['Learner id', `#${learner.id}`],

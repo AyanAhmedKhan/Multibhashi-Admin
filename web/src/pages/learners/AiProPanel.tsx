@@ -271,7 +271,7 @@ function GiveAiPro({ learnerId, onClose, onDone }: { learnerId: number; onClose:
             <Field label="Course">
               {(id) => (
                 <Select id={id} value={courseId} onChange={(e) => (setCourseId(e.target.value), setLevel(''), setPreview(null))}>
-                  <option value="">Choose…</option>
+                  <option value="">{courses.isLoading ? 'Loading courses…' : 'Choose…'}</option>
                   {(courses.data?.courses ?? []).map((c) => (
                     <option key={c.id} value={c.id}>{c.name}</option>
                   ))}
@@ -291,13 +291,24 @@ function GiveAiPro({ learnerId, onClose, onDone }: { learnerId: number; onClose:
                     setPreview(null)
                   }}
                 >
-                  <option value="">Choose…</option>
+                  <option value="">{catalog.isFetching ? 'Loading levels…' : 'Choose…'}</option>
                   {levels.map((l) => (
                     <option key={l.level} value={l.level}>{l.level} ({l.lessons} lessons)</option>
                   ))}
                 </Select>
               )}
             </Field>
+            {(courses.error || catalog.error) && (
+              <div className="sm:col-span-2">
+                <ErrorNote error={courses.error ?? catalog.error} />
+              </div>
+            )}
+            {courses.data && !courses.data.courses.length && (
+              <p className="text-sm text-muted-foreground sm:col-span-2">No course has lessons with a level yet, so there is nothing to unlock.</p>
+            )}
+            {courseId && catalog.data && !levels.length && (
+              <p className="text-sm text-muted-foreground sm:col-span-2">This course has no levelled lessons. Pick another course.</p>
+            )}
             <Field label="From lesson">{(id) => <Input id={id} type="number" min={0} value={from} onChange={(e) => (setFrom(e.target.value), setPreview(null))} />}</Field>
             <Field label="To lesson">{(id) => <Input id={id} type="number" min={0} value={to} onChange={(e) => (setTo(e.target.value), setPreview(null))} />}</Field>
             <Field label="AI minutes per lesson card" hint="0 = access only, no minutes">

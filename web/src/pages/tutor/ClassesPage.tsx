@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
+import { LearnerName } from '../../components/learner-name'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { Search } from 'lucide-react'
 import { api, type Paginated } from '../../lib/api'
@@ -98,7 +99,7 @@ export function ClassesPage() {
                   <Td className="max-w-xs">{c.lesson_topic ?? '—'}</Td>
                   <Td>
                     <Link to={`/learners/${c.user_id}`} className="text-foreground hover:text-primary">
-                      {c.learner_name ?? `#${c.user_id}`}
+                      <LearnerName name={c.learner_name} />
                     </Link>
                     <div className="text-xs text-muted-foreground">#{c.user_id}</div>
                   </Td>

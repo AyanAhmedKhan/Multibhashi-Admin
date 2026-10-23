@@ -3,6 +3,7 @@ import ApiException from '#exceptions/api_exception'
 import auditService from '#services/audit_service'
 import learnerMemoryService from '#services/tutor/memory_service'
 import { maskEmail, maskName, maskPhone } from '#helpers/mask'
+import { realName } from '#helpers/learner_name'
 import { tableExists, withoutSecrets } from '#helpers/schema'
 import type { Actor } from '#services/actor'
 
@@ -14,21 +15,48 @@ interface LearnerRow {
   created_at: Date | null
 }
 
+/** Where the name shown comes from: the account itself, a CRM enquiry, or nowhere yet. */
+type NameSource = 'account' | 'enquiry' | null
+
 const like = (text: string) => `%${text.replace(/[%_\\]/g, '\\$&')}%`
 
-function plain(row: LearnerRow) {
-  return { id: row.id, name: row.name, email: row.email, phone: row.phone, createdAt: row.created_at, masked: false }
+function plain(row: LearnerRow, name: string | null, nameSource: NameSource) {
+  return { id: row.id, name, nameSource, email: row.email, phone: row.phone, createdAt: row.created_at, masked: false }
 }
 
-function masked(row: LearnerRow) {
+function masked(row: LearnerRow, name: string | null, nameSource: NameSource) {
   return {
     id: row.id,
-    name: maskName(row.name),
+    name: maskName(name),
+    nameSource,
     email: maskEmail(row.email),
     phone: maskPhone(row.phone),
     createdAt: row.created_at,
     masked: true,
   }
+}
+
+/**
+ * The account name, or for a placeholder account ("User") the newest real name on one of
+ * the learner's CRM enquiries (direct_leads), or nothing.
+ */
+async function displayNames(rows: LearnerRow[]) {
+  const names = new Map<number, { name: string | null; source: NameSource }>()
+  const missing: number[] = []
+  for (const row of rows) {
+    const name = realName(row.name)
+    names.set(row.id, { name, source: name ? 'account' : null })
+    if (!name) missing.push(row.id)
+  }
+  if (missing.length && (await tableExists('direct_leads'))) {
+    const leads = await db.from('direct_leads').whereIn('user_id', missing).whereNotNull('name').orderBy('id', 'desc').select('user_id', 'name')
+    for (const lead of leads) {
+      const current = names.get(lead.user_id)
+      const name = realName(lead.name)
+      if (current && !current.name && name) names.set(lead.user_id, { name, source: 'enquiry' })
+    }
+  }
+  return names
 }
 
 class LearnersService {
@@ -53,6 +81,7 @@ class LearnersService {
     const result = await query.paginate(page, perPage)
     const json = result.toJSON()
     const ids = json.data.map((r) => r.id)
+    const names = await displayNames(json.data as LearnerRow[])
     const stats = ids.length
       ? await db
           .from('ai_tutor_chats')
@@ -67,8 +96,9 @@ class LearnersService {
       ...json,
       data: json.data.map((row) => {
         const s = stats.find((x) => x.user_id === row.id)
+        const { name, source } = names.get(row.id)!
         return {
-          ...(showPii ? plain(row as LearnerRow) : masked(row as LearnerRow)),
+          ...(showPii ? plain(row as LearnerRow, name, source) : masked(row as LearnerRow, name, source)),
           classes: Number(s?.classes ?? 0),
           minutesUsed: Number(s?.minutes_used ?? 0),
           lastClassAt: s?.last_class_at ?? null,
@@ -83,6 +113,7 @@ class LearnersService {
       | LearnerRow
       | undefined
     if (!row) throw new ApiException(404, 'Learner not found')
+    const { name, source } = (await displayNames([row])).get(row.id)!
     const [classes, totals, grantsToday, memory] = await Promise.all([
       db
         .from('ai_tutor_chats')
@@ -110,7 +141,7 @@ class LearnersService {
       await auditService.record({ actor, action: 'learners.profile.viewed', targetType: 'learner', targetId: id })
     }
     return {
-      learner: showPii ? plain(row) : masked(row),
+      learner: showPii ? plain(row, name, source) : masked(row, name, source),
       profile: showPii ? await this.profile(id) : null,
       stats: {
         classes: Number(totals?.classes ?? 0),
@@ -170,6 +201,24 @@ class LearnersService {
       bookings: bookings.map((b: Record<string, unknown>) => withoutSecrets(b)),
       subscriptions: subscriptions.map((b: Record<string, unknown>) => withoutSecrets(b)),
     }
+  }
+
+  /**
+   * Sets the learner's account name, the same column the app's profile screen writes
+   * (PUT /user/:id). The app and the AI tutor show it from the next screen load.
+   */
+  async rename(actor: Actor, id: number, name: string, reason: string) {
+    return db.transaction(async (trx) => {
+      const row = await trx.from('users').where('id', id).forUpdate().select('id', 'name').first()
+      if (!row) throw new ApiException(404, 'Learner not found')
+      if (row.name === name) return { id, name }
+      await trx.from('users').where('id', id).update({ name, updated_at: new Date() })
+      await auditService.record(
+        { actor, action: 'learners.renamed', targetType: 'learner', targetId: id, reason, metadata: { from: row.name, to: name } },
+        trx
+      )
+      return { id, name }
+    })
   }
 
   async reveal(actor: Actor, id: number, reason: string) {

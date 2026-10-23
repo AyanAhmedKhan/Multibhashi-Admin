@@ -82,9 +82,10 @@ CREATE TABLE IF NOT EXISTS student_daily_activity (
   UNIQUE KEY uq_sda (user_id, activity_date)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- The monolith names a course in `title` (there is no `name` column).
 CREATE TABLE IF NOT EXISTS courses (
   id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  name VARCHAR(255) NOT NULL,
+  title VARCHAR(255) NULL,
   slug VARCHAR(255) NULL,
   created_at DATETIME NULL,
   updated_at DATETIME NULL
@@ -167,4 +168,17 @@ CREATE TABLE IF NOT EXISTS course_lesson_subscriptions (
   created_at DATETIME NULL,
   updated_at DATETIME NULL,
   KEY idx_cls_user (user_id, course_lesson_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- CRM enquiries (the monolith's DirectLead model); the console reads a name from here
+-- when the account still has the app's placeholder name.
+CREATE TABLE IF NOT EXISTS direct_leads (
+  id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  user_id INT UNSIGNED NULL,
+  name VARCHAR(255) NULL,
+  phone VARCHAR(32) NULL,
+  email VARCHAR(255) NULL,
+  created_at DATETIME NULL,
+  updated_at DATETIME NULL,
+  KEY idx_dl_user (user_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

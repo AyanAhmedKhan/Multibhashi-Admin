@@ -74,6 +74,7 @@ export default class ConsoleSeedDemo extends BaseCommand {
         'course_lesson_package_bookings',
         'course_lesson_subscriptions',
         'console_ai_pro_grants',
+        'direct_leads',
         ...(usageTable ? ['ai_tutor_session_usage'] : []),
       ]) {
         await db.from(table).whereBetween('user_id', [FIRST_USER, lastUser]).delete()
@@ -114,7 +115,7 @@ export default class ConsoleSeedDemo extends BaseCommand {
     let cardId = 9_000_000
     let otherQuestionId = 9_500_000
     for (const course of COURSES) {
-      await db.table('courses').insert({ id: course.id, name: course.name, slug: `demo-${course.id}`, created_at: new Date(), updated_at: new Date() })
+      await db.table('courses').insert({ id: course.id, title: course.name, slug: `demo-${course.id}`, created_at: new Date(), updated_at: new Date() })
       await db.table('course_lesson_packages').insert({
         course_id: course.id,
         name: 'Premium',
@@ -171,16 +172,31 @@ export default class ConsoleSeedDemo extends BaseCommand {
         course: pick(COURSES, [5, 2, 3]),
       })
     }
+    // Like production, a third sign up by phone and keep the app's placeholder name "User"
+    // with no email; some of those have a CRM enquiry that carries their real name.
+    const placeholder = (id: number) => id % 3 === 0
     await insert(
       'users',
       users.map((u) => ({
         id: u.id,
         phone: `70000${String(u.id).padStart(5, '0')}`,
-        name: `Demo Learner ${u.id - FIRST_USER + 1}`,
-        email: `demo${u.id}@example.test`,
+        name: placeholder(u.id) ? 'User' : `Demo Learner ${u.id - FIRST_USER + 1}`,
+        email: placeholder(u.id) ? null : `demo${u.id}@example.test`,
         created_at: new Date(u.createdAt),
         updated_at: new Date(u.createdAt),
       }))
+    )
+    await insert(
+      'direct_leads',
+      users
+        .filter((u) => placeholder(u.id) && u.id % 2 === 0)
+        .map((u) => ({
+          user_id: u.id,
+          name: `Enquiry Name ${u.id - FIRST_USER + 1}`,
+          phone: `70000${String(u.id).padStart(5, '0')}`,
+          created_at: new Date(u.createdAt),
+          updated_at: new Date(u.createdAt),
+        }))
     )
 
     // --- app sessions, screen visits, events

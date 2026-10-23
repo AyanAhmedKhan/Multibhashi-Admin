@@ -19,6 +19,14 @@ export default class ConsoleDevSchema extends BaseCommand {
       .map((s) => s.replace(/^\s*--.*$/gm, '').trim())
       .filter(Boolean)
     for (const statement of statements) await db.rawQuery(statement)
+    // Older local copies named the course column `name`; the monolith calls it `title`.
+    const [columns] = await db.rawQuery(
+      "SELECT COLUMN_NAME AS c FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'courses'"
+    )
+    const names = (columns as { c: string }[]).map((r) => r.c)
+    if (names.includes('name') && !names.includes('title')) {
+      await db.rawQuery('ALTER TABLE courses CHANGE name title VARCHAR(255) NULL')
+    }
     this.logger.success(`Applied ${statements.length} CREATE TABLE IF NOT EXISTS statements`)
   }
 }

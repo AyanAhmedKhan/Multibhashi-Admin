@@ -3,6 +3,7 @@ import AiTutorChat from '#models/ai_tutor_chat'
 import ApiException from '#exceptions/api_exception'
 import auditService from '#services/audit_service'
 import { maskName } from '#helpers/mask'
+import { realName } from '#helpers/learner_name'
 import type { Actor } from '#services/actor'
 
 export interface ClassFilters {
@@ -56,7 +57,7 @@ class ClassesService {
       ...json,
       data: json.data.map((row) => ({
         ...row,
-        learner_name: revealNames ? row.learner_name : maskName(row.learner_name),
+        learner_name: revealNames ? realName(row.learner_name) : maskName(realName(row.learner_name)),
       })),
     }
   }

@@ -6,7 +6,7 @@ import liveService from '#services/tutor/live_service'
 import minutesService from '#services/tutor/minutes_service'
 import overviewService from '#services/tutor/overview_service'
 import auditService from '#services/audit_service'
-import { grantValidator, listValidator, reasonValidator } from '#validators/console'
+import { grantValidator, learnerNameValidator, listValidator, reasonValidator } from '#validators/console'
 
 /** The AI Tutor module and the learner pages built on it. */
 export default class TutorController {
@@ -71,6 +71,11 @@ export default class TutorController {
 
   async learner({ params, actor }: HttpContext) {
     return learnersService.get(Number(params.id), actor)
+  }
+
+  async renameLearner({ request, actor, params }: HttpContext) {
+    const { name, reason } = await request.validateUsing(learnerNameValidator)
+    return learnersService.rename(actor, Number(params.id), name, reason)
   }
 
   async revealLearner({ request, actor, params }: HttpContext) {
