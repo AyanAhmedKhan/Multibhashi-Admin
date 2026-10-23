@@ -13,7 +13,7 @@ import { ALL } from '#rbac/permissions'
  * - PII is its own permission (masked by default), so most roles work on masked data.
  * `legacy` lists the monolith role slugs (teachers-dashboard `is:(...)` checks) each
  * role replaces, for the account migration. Nobody is migrated into super_admin: the
- * owners name its two holders. The monolith's `teacher` role is not a staff role at all;
+ * owners name its holders. The monolith's `teacher` role is not a staff role at all;
  * trainers get their own portal (docs/PLAN.md).
  */
 export interface SystemRole {
@@ -34,7 +34,7 @@ export const SYSTEM_ROLES: SystemRole[] = [
     name: 'Super Admin',
     description:
       'Owns the console: staff, roles, security policy, approvals. Not a daily-ops account.',
-    seats: '2 (never 1, at most 3)',
+    seats: '2 or more (never just 1)',
     legacy: [],
     permissions: [ALL],
   },

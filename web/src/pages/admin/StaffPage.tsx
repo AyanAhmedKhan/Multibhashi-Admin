@@ -182,9 +182,9 @@ export function StaffPage() {
       <div className="mb-4 flex flex-wrap items-center gap-2 text-sm">
         <Badge tone="green">{counts.active} active</Badge>
         <Badge tone="amber">{counts.invited} invited</Badge>
-        <Badge tone={counts.supers === 2 ? 'violet' : 'red'}>
+        <Badge tone={counts.supers >= 2 ? 'violet' : 'red'}>
           <Crown className="size-3" /> {counts.supers} Super Admin{counts.supers === 1 ? '' : 's'}
-          {counts.supers !== 2 && ' (keep 2)'}
+          {counts.supers < 2 && ' (add a second)'}
         </Badge>
       </div>
       <ErrorNote error={staff.error} />

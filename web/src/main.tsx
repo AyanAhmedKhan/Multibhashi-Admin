@@ -1,6 +1,6 @@
-import { StrictMode } from 'react'
+import { StrictMode, type ReactNode } from 'react'
 import { createRoot } from 'react-dom/client'
-import { BrowserRouter } from 'react-router-dom'
+import { BrowserRouter, useLocation } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ThemeProvider } from 'next-themes'
 import { TooltipProvider } from '@/components/ui/tooltip'
@@ -16,22 +16,35 @@ const queryClient = new QueryClient({
   },
 })
 
+/**
+ * The theme choice is a per-viewer convenience kept in localStorage by next-themes.
+ * Sign-in and invite pages are always light; the saved choice applies again after sign-in.
+ */
+function Themed({ children }: { children: ReactNode }) {
+  const { pathname } = useLocation()
+  const light = pathname === '/login' || pathname.startsWith('/setup/')
+  return (
+    <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange forcedTheme={light ? 'light' : undefined}>
+      {children}
+    </ThemeProvider>
+  )
+}
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    {/* The theme choice is a per-viewer convenience kept in localStorage by next-themes. */}
-    <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
-      <QueryClientProvider client={queryClient}>
-        <TooltipProvider delayDuration={200}>
-          <BrowserRouter>
+    <BrowserRouter>
+      <Themed>
+        <QueryClientProvider client={queryClient}>
+          <TooltipProvider delayDuration={200}>
             <AuthProvider>
               <DialogsProvider>
                 <App />
               </DialogsProvider>
             </AuthProvider>
-          </BrowserRouter>
-          <Toaster richColors closeButton position="top-right" />
-        </TooltipProvider>
-      </QueryClientProvider>
-    </ThemeProvider>
+            <Toaster richColors closeButton position="top-right" />
+          </TooltipProvider>
+        </QueryClientProvider>
+      </Themed>
+    </BrowserRouter>
   </StrictMode>
 )

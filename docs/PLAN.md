@@ -144,7 +144,7 @@ they hold themselves.
 
 | Role | What they do | Seats | Replaces old slugs |
 |---|---|---|---|
-| **Super Admin** | Owns the console: staff, roles, security policy, final approvals. Not a daily-ops account. | **2** (never 1, at most 3) | none: chosen by name |
+| **Super Admin** | Owns the console: staff, roles, security policy, final approvals. Not a daily-ops account. | **2 or more** (never just 1) | none: chosen by name |
 | Platform Admin | Runs the business across modules; cannot change access or security | 1–2 | `admin`, `super_admin` |
 | Operations Manager | Classes, schedules, trainers, AI tutor; escalations; approves big grants | 1 per ops team | `ops_manager`, `relationship_manager` |
 | Support Agent | Finds learners, checks classes and minutes, small goodwill grants, chat moderation | per support team | `chat_admin` |
@@ -162,10 +162,10 @@ they hold themselves.
 
 ### How many admins
 
-- **Super Admins: exactly 2.** One is a single point of failure (holiday, lost phone);
-  more than 3 means nobody really owns access. Bootstrap the first from the CLI; the first
-  adds the second directly; from then on a new Super Admin needs another Super Admin's
-  approval.
+- **Super Admins: at least 2, no upper limit.** One is a single point of failure (holiday,
+  lost phone); add more as the owners decide, and review the list quarterly, since every
+  Super Admin can change anyone's access. Bootstrap the first from the CLI; the first adds
+  the second directly; from then on a new Super Admin needs another Super Admin's approval.
 - **Platform Admins: 1–2** (the COO/head of ops), not "everyone senior".
 - Everyone else: one account per person, the narrowest role that fits the job. **No shared
   logins**, ever, because the audit log is only as good as the identities in it.
@@ -410,7 +410,7 @@ Each phase ships on its own and switches the matching old pages off.
 - **Access review, quarterly**: each manager confirms their team's roles; remove what isn't
   used; Auditor accounts are time-boxed.
 - **Approvals**: target a decision within one working day; requests expire after 48 h.
-- **Break-glass**: if both Super Admins are unavailable, the CTO runs
+- **Break-glass**: if every Super Admin is unavailable, the CTO runs
   `node ace console:bootstrap` on the server only after removing the Super Admin role in the
   DB under a recorded incident. It refuses while an active Super Admin exists.
 - **Audit**: the Privacy Officer runs "Verify integrity" monthly and after incidents.
@@ -423,7 +423,7 @@ Each phase ships on its own and switches the matching old pages off.
 ## 13. Decisions needed
 
 1. **Phase 0**: who fixes the monolith findings, and when (findings 1–5 are urgent).
-2. **The two Super Admins** (names).
+2. **The Super Admins** (names; at least two).
 3. ~~Exact AI cost~~: approved and working locally (§8); goes live when the tutor API migration reaches production.
 4. **Approval thresholds**: keep the defaults (60 min; 30 days / 300 min AI Pro) or change them.
 5. **Domain and network**: `admin.multibhashi.com`, and whether to require office/VPN IPs.
