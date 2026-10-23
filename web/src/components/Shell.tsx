@@ -152,9 +152,9 @@ function AppSidebar() {
           <SidebarMenuItem>
             <SidebarMenuButton size="lg" asChild>
               <Link to="/" onClick={() => setOpenMobile(false)}>
-                <div className="grid size-8 shrink-0 place-items-center rounded-lg bg-primary text-sm font-bold text-primary-foreground">M</div>
+                <img src="/brand/multibhashi-mark.png" alt="" className="size-8 shrink-0 object-contain" />
                 <div className="grid flex-1 text-left leading-tight">
-                  <span className="truncate text-sm font-semibold">MultiBhashi</span>
+                  <span className="truncate text-sm font-semibold">Multibhashi</span>
                   <span className="truncate text-xs text-muted-foreground">Admin Console</span>
                 </div>
               </Link>

@@ -22,9 +22,12 @@ export function AuthLayout({ title, subtitle, children }: { title: string; subti
         <div className="absolute -top-24 -right-24 size-96 rounded-full bg-white/10 blur-3xl" aria-hidden />
         <div className="absolute -bottom-32 -left-16 size-96 rounded-full bg-black/10 blur-3xl" aria-hidden />
         <div className="relative flex items-center gap-3">
-          <div className="grid size-10 place-items-center rounded-xl bg-white/15 text-lg font-bold">M</div>
+          {/* the blue mark sits on a white tile: the panel behind it is the brand blue */}
+          <div className="grid size-10 place-items-center rounded-xl bg-white p-1 shadow-sm">
+            <img src="/brand/multibhashi-mark.png" alt="" className="size-full object-contain" />
+          </div>
           <div className="leading-tight">
-            <div className="font-semibold">MultiBhashi</div>
+            <div className="font-semibold">Multibhashi</div>
             <div className="text-sm opacity-80">Admin Console</div>
           </div>
         </div>
@@ -47,9 +50,9 @@ export function AuthLayout({ title, subtitle, children }: { title: string; subti
       <main className="flex items-center justify-center px-4 py-10">
         <div className="w-full max-w-sm">
           <div className="mb-6 flex items-center gap-2 lg:hidden">
-            <div className="grid size-9 place-items-center rounded-lg bg-primary font-bold text-primary-foreground">M</div>
+            <img src="/brand/multibhashi-mark.png" alt="" className="size-9 object-contain" />
             <div className="leading-tight">
-              <div className="font-semibold">MultiBhashi</div>
+              <div className="font-semibold">Multibhashi</div>
               <div className="text-xs text-muted-foreground">Admin Console</div>
             </div>
           </div>

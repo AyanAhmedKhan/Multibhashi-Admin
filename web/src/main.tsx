@@ -17,14 +17,15 @@ const queryClient = new QueryClient({
 })
 
 /**
- * The theme choice is a per-viewer convenience kept in localStorage by next-themes.
- * Sign-in and invite pages are always light; the saved choice applies again after sign-in.
+ * The theme choice is a per-viewer convenience kept in localStorage by next-themes; light
+ * until a viewer picks another. Sign-in and invite pages are always light; the saved choice
+ * applies again after sign-in.
  */
 function Themed({ children }: { children: ReactNode }) {
   const { pathname } = useLocation()
   const light = pathname === '/login' || pathname.startsWith('/setup/')
   return (
-    <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange forcedTheme={light ? 'light' : undefined}>
+    <ThemeProvider attribute="class" defaultTheme="light" enableSystem disableTransitionOnChange forcedTheme={light ? 'light' : undefined}>
       {children}
     </ThemeProvider>
   )
