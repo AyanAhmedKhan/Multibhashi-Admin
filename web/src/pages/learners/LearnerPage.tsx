@@ -1,17 +1,36 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Brain, Download, Eye, Trash2 } from 'lucide-react'
+import { Activity, Brain, CalendarDays, Clock, Download, Lock, Smartphone, Timer, Trash2 } from 'lucide-react'
+import { toast } from 'sonner'
+import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { api } from '../../lib/api'
 import { useAuth } from '../../lib/auth'
-import { fmtDateTime, fmtInt, fmtMinutes } from '../../lib/format'
+import { fmtAgo, fmtDateTime, fmtInt, fmtMinutes } from '../../lib/format'
 import { useReason } from '../../components/dialogs'
-import { Badge, Button, Card, ErrorNote, KeyValue, PageHeader, Spinner, Stat, Table, Td } from '../../components/ui'
+import { Badge, Button, Card, Empty, ErrorNote, KeyValue, Spinner, Stat, Table, Tabs, Td } from '../../components/ui'
 import { statusTone } from '../tutor/ClassesPage'
+import { initials } from '../admin/StaffPage'
 import { AiProPanel } from './AiProPanel'
 
+type Row = Record<string, unknown>
+
 interface LearnerDetail {
-  learner: { id: number; name: string | null; email: string | null; phone: string | null; createdAt: string | null }
+  learner: { id: number; name: string | null; email: string | null; phone: string | null; createdAt: string | null; masked: boolean }
+  profile: {
+    account: Row | null
+    details: Row | null
+    languages: { speaks: Row[]; learns: Row[] }
+    activity: {
+      lastSeen: string | null
+      sessions30d: number
+      appMinutes30d: number
+      devices: { device: string; appVersion: string | null; lastSeen: string | null }[]
+      screens30d: { screen: string; visits: number; minutes: number }[]
+    }
+    bookings: Row[]
+    subscriptions: Row[]
+  } | null
   stats: { classes: number; minutesUsed: number; minutesLeft: number; freeGrantsLast24h: number }
   memory: { version: number; erasedAt: string | null; updatedAt: string | null } | null
   classes: { id: number; status: string | null; lesson_topic: string | null; total_minutes: number; remaining_minutes: number; time_spent: number; created_at: string }[]
@@ -22,27 +41,60 @@ interface Memory {
   summaries: { id: number; classId: number; language: string | null; summary: string; updatedAt: string }[]
 }
 
+const SCREEN: Record<string, string> = { pdf: 'PDF lesson', quiz: 'Quiz', quiz_feedback: 'Quiz feedback', video: 'Recording', learn_card_video: 'Learn-card video', lesson: 'Lesson list', ai_tutor: 'AI tutor' }
+
+const label = (key: string) => key.replace(/_/g, ' ').replace(/^\w/, (c) => c.toUpperCase())
+
+/** A database value as people read it: dates, booleans, epoch-ms, empty. */
+function show(key: string, value: unknown): ReactNode {
+  if (value === null || value === undefined || value === '') return <span className="text-muted-foreground">—</span>
+  if (typeof value === 'boolean' || ((key.startsWith('is_') || key.startsWith('has_')) && (value === 0 || value === 1))) return value ? 'Yes' : 'No'
+  if (typeof value === 'number' && /(_on|_at|_ms|expire|timestamp)$/.test(key) && value > 1e12) return fmtDateTime(new Date(value))
+  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(value)) return fmtDateTime(value)
+  if (typeof value === 'object') return <code className="text-xs">{JSON.stringify(value).slice(0, 200)}</code>
+  const text = String(value)
+  return text.length > 200 ? `${text.slice(0, 200)}…` : text
+}
+
+function Fields({ row, skip = [] }: { row: Row | null; skip?: string[] }) {
+  if (!row) return <p className="text-sm text-muted-foreground">Not recorded.</p>
+  const entries = Object.entries(row).filter(([k]) => !skip.includes(k))
+  return <KeyValue items={entries.map(([k, v]) => [label(k), show(k, v)] as [ReactNode, ReactNode])} />
+}
+
+function RowsTable({ rows, empty }: { rows: Row[]; empty: string }) {
+  if (!rows.length) return <Empty title={empty} />
+  const keys = Object.keys(rows[0]).filter((k) => !['updated_at', 'deleted_at'].includes(k)).slice(0, 8)
+  return (
+    <Table head={keys.map(label)}>
+      {rows.map((r, i) => (
+        <tr key={i} className="border-b">
+          {keys.map((k) => (
+            <Td key={k} className="whitespace-nowrap text-sm">
+              {show(k, r[k])}
+            </Td>
+          ))}
+        </tr>
+      ))}
+    </Table>
+  )
+}
+
+type TabKey = 'overview' | 'profile' | 'classes' | 'bookings' | 'memory'
+
 export function LearnerPage() {
   const { id } = useParams()
   const { can } = useAuth()
   const ask = useReason()
   const queryClient = useQueryClient()
   const detail = useQuery({ queryKey: ['learner', id], queryFn: () => api.get<LearnerDetail>(`learners/${id}`) })
-  const [revealed, setRevealed] = useState<{ name: string | null; email: string | null; phone: string | null } | null>(null)
   const [memory, setMemory] = useState<Memory | null>(null)
+  const [tab, setTab] = useState<TabKey>('overview')
 
-  if (detail.isLoading) return <Spinner />
+  if (detail.isLoading) return <Spinner rows={8} />
   if (detail.error || !detail.data) return <ErrorNote error={detail.error} />
-  const { learner, stats } = detail.data
-  const shown = revealed ?? learner
-
-  const reveal = () =>
-    ask({
-      title: 'Reveal contact details',
-      description: 'Only when you need to contact this learner or confirm who they are. Recorded with your reason.',
-      confirmLabel: 'Reveal',
-      run: async (reason) => setRevealed(await api.post(`learners/${id}/reveal`, { reason })),
-    })
+  const { learner, stats, profile } = detail.data
+  const display = learner.name || `Learner #${learner.id}`
 
   const viewMemory = () =>
     ask({
@@ -55,18 +107,14 @@ export function LearnerPage() {
   const eraseMemory = () =>
     ask({
       title: 'Erase AI tutor memory',
-      description: (
-        <>
-          Deletes the learner’s profile and every class summary, exactly like saying “forget everything” in class. A class in progress can’t write the old
-          memory back. This can’t be undone.
-        </>
-      ),
+      description: 'Deletes the learner’s profile and every class summary, exactly like saying “forget everything” in class. A class in progress can’t write the old memory back. This can’t be undone.',
       confirmText: 'ERASE',
       confirmLabel: 'Erase memory',
       danger: true,
       run: async (reason) => {
         await api.post(`learners/${id}/memory/erase`, { reason })
         setMemory(null)
+        toast.success('Tutor memory erased')
         await queryClient.invalidateQueries({ queryKey: ['learner', id] })
       },
     })
@@ -84,118 +132,252 @@ export function LearnerPage() {
         a.download = `learner-${id}-ai-tutor-data.json`
         a.click()
         URL.revokeObjectURL(url)
+        toast.success('Export downloaded')
       },
     })
 
+  const tabs: { value: TabKey; label: string }[] = [
+    { value: 'overview', label: 'Overview' },
+    ...(profile ? [{ value: 'profile' as const, label: 'Profile' }] : []),
+    { value: 'classes', label: `AI classes (${stats.classes})` },
+    ...(profile ? [{ value: 'bookings' as const, label: 'Bookings & plans' }] : []),
+    ...(can('tutor.memory.read') || can('tutor.memory.erase') ? [{ value: 'memory' as const, label: 'Tutor memory' }] : []),
+  ]
+
   return (
     <>
-      <PageHeader
-        title={shown.name ?? `Learner #${learner.id}`}
-        subtitle={`Learner #${learner.id} · joined ${fmtDateTime(learner.createdAt)}`}
-        actions={
-          <>
-            {can('learners.pii.read') && !revealed && (
-              <Button icon={<Eye className="size-4" />} onClick={reveal}>
-                Reveal contact
-              </Button>
-            )}
-            {can('learners.export') && (
-              <Button icon={<Download className="size-4" />} onClick={exportData}>
-                Export data
-              </Button>
-            )}
-          </>
-        }
-      />
-      <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Stat label="AI tutor classes" value={fmtInt(stats.classes)} />
-        <Stat label="Minutes used" value={fmtMinutes(stats.minutesUsed)} />
-        <Stat label="Minutes left (all classes)" value={fmtMinutes(stats.minutesLeft)} />
-        <Stat label="Free grants, last 24 h" value={fmtInt(stats.freeGrantsLast24h)} tone={stats.freeGrantsLast24h >= 8 ? 'amber' : undefined} hint="tutor API cap (default 10 a day)" />
-      </div>
-      <div className="grid gap-6 lg:grid-cols-2">
-        <Card title="Contact">
-          <KeyValue
-            items={[
-              ['Name', shown.name ?? '—'],
-              ['Phone', <span className="tabular">{shown.phone ?? '—'}</span>],
-              ['Email', shown.email ?? '—'],
-              ['Shown', revealed ? <Badge tone="amber">revealed (audited)</Badge> : <Badge>masked</Badge>],
-            ]}
-          />
-        </Card>
-        {can('tutor.access.read') ? <AiProPanel learnerId={learner.id} /> : <div />}
-
-        <Card title="AI tutor classes" className="lg:col-span-2" padded={false}>
-          <Table head={['Class', 'Lesson', 'Status', 'Used / total', 'Left', 'Started']}>
-            {detail.data.classes.map((c) => (
-              <tr key={c.id} className="hover:bg-surface-2">
-                <Td>
-                  <Link className="font-medium text-primary" to={`/tutor/classes/${c.id}`}>#{c.id}</Link>
-                </Td>
-                <Td>{c.lesson_topic ?? <span className="text-ink-3">Not started yet</span>}</Td>
-                <Td><Badge tone={statusTone(c.status)}>{c.status ?? 'unknown'}</Badge></Td>
-                <Td className="tabular whitespace-nowrap">{fmtMinutes(c.time_spent)} / {fmtMinutes(c.total_minutes)}</Td>
-                <Td className="tabular">{fmtMinutes(c.remaining_minutes)}</Td>
-                <Td className="whitespace-nowrap">{fmtDateTime(c.created_at)}</Td>
-              </tr>
-            ))}
-            {!detail.data.classes.length && (
-              <tr><Td className="text-ink-3">No AI tutor classes yet.</Td></tr>
-            )}
-          </Table>
-        </Card>
-
-        {(can('tutor.memory.read') || can('tutor.memory.erase')) && (
-          <Card
-            title={<span className="inline-flex items-center gap-2"><Brain className="size-4 text-violet" aria-hidden /> Tutor memory</span>}
-            className="lg:col-span-2"
-            actions={
-              <>
-                {can('tutor.memory.read') && !memory && <Button size="sm" onClick={viewMemory}>View</Button>}
-                {can('tutor.memory.erase') && <Button size="sm" variant="danger" icon={<Trash2 className="size-4" />} onClick={eraseMemory}>Erase</Button>}
-              </>
-            }
-          >
-            {!memory ? (
-              <p className="text-sm text-ink-2">
-                {detail.data.memory
-                  ? `Profile version ${detail.data.memory.version}, updated ${fmtDateTime(detail.data.memory.updatedAt)}${detail.data.memory.erasedAt ? ` · last erased ${fmtDateTime(detail.data.memory.erasedAt)}` : ''}.`
-                  : 'The tutor has no memory of this learner yet.'}
-              </p>
-            ) : (
-              <div className="space-y-4 text-sm">
-                {!memory.profile || !Object.keys(memory.profile.memory ?? {}).length ? (
-                  <p className="text-ink-3">The profile is empty.</p>
-                ) : (
-                  <>
-                    {!!memory.profile.memory.facts?.length && <div><div className="text-xs text-ink-3">Facts</div><p>{memory.profile.memory.facts.join(' · ')}</p></div>}
-                    {Object.entries(memory.profile.memory.languages ?? {}).map(([lang, m]) => (
-                      <div key={lang} className="rounded-lg bg-surface-2 p-3">
-                        <div className="font-medium">{lang} · {m.level ?? 'level unknown'}</div>
-                        {m.strengths?.length ? <div className="text-ink-2">Strong: {m.strengths.join(', ')}</div> : null}
-                        {m.struggles?.length ? <div className="text-ink-2">Struggles: {m.struggles.join(', ')}</div> : null}
-                        {m.practice_next?.length ? <div className="text-ink-2">Practise next: {m.practice_next.join(', ')}</div> : null}
-                      </div>
-                    ))}
-                  </>
-                )}
-                <div>
-                  <div className="mb-1 text-xs text-ink-3">Class summaries ({memory.summaries.length})</div>
-                  <ul className="space-y-2">
-                    {memory.summaries.map((s) => (
-                      <li key={s.id} className="rounded-lg border border-line p-2">
-                        <div className="text-xs text-ink-3">Class #{s.classId} · {s.language ?? '—'} · {fmtDateTime(s.updatedAt)}</div>
-                        <p className="text-ink-2">{s.summary}</p>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              </div>
-            )}
-          </Card>
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
+        <div className="flex min-w-0 items-center gap-4">
+          <Avatar className="size-14">
+            <AvatarFallback className="bg-accent text-lg font-semibold text-accent-foreground">{learner.name ? initials(learner.name) : '#'}</AvatarFallback>
+          </Avatar>
+          <div className="min-w-0">
+            <h1 className="truncate text-2xl font-semibold tracking-tight">{display}</h1>
+            <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
+              <span>#{learner.id}</span>
+              {learner.phone && <span className="tabular">{learner.phone}</span>}
+              {learner.email && <span>{learner.email}</span>}
+              <span>joined {fmtDateTime(learner.createdAt)}</span>
+              {learner.masked && (
+                <Badge tone="neutral">
+                  <Lock className="size-3" /> contact masked for your role
+                </Badge>
+              )}
+            </p>
+          </div>
+        </div>
+        {can('learners.export') && (
+          <Button icon={<Download />} onClick={exportData}>
+            Export data
+          </Button>
         )}
       </div>
+
+      <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <Stat label="AI tutor classes" value={fmtInt(stats.classes)} icon={<Activity />} />
+        <Stat label="Minutes used" value={fmtMinutes(stats.minutesUsed)} icon={<Timer />} />
+        <Stat label="Minutes left" value={fmtMinutes(stats.minutesLeft)} icon={<Clock />} hint="across all classes" />
+        <Stat
+          label="Last seen in the app"
+          value={profile?.activity.lastSeen ? fmtAgo(profile.activity.lastSeen) : '—'}
+          icon={<Smartphone />}
+          hint={profile ? `${fmtInt(profile.activity.sessions30d)} sessions in 30 days` : undefined}
+        />
+      </div>
+
+      <Tabs value={tab} onChange={setTab} items={tabs} />
+
+      {tab === 'overview' && (
+        <div className="grid gap-6 lg:grid-cols-2">
+          <Card title="Contact">
+            <KeyValue
+              items={[
+                ['Name', learner.name ?? '—'],
+                ['Phone', <span className="tabular">{learner.phone ?? '—'}</span>],
+                ['Email', learner.email ?? '—'],
+                ['Learner id', `#${learner.id}`],
+                ['Joined', fmtDateTime(learner.createdAt)],
+                ['Free grants, last 24 h', `${stats.freeGrantsLast24h} (tutor API cap: 10 a day)`],
+              ]}
+            />
+          </Card>
+          {can('tutor.access.read') ? <AiProPanel learnerId={learner.id} /> : <div />}
+          {profile && (
+            <Card title="Activity, last 30 days" className="lg:col-span-2">
+              <div className="grid gap-6 md:grid-cols-2">
+                <div>
+                  <div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">Most used screens</div>
+                  {profile.activity.screens30d.length ? (
+                    <ul className="space-y-2 text-sm">
+                      {profile.activity.screens30d.map((s) => (
+                        <li key={s.screen} className="flex justify-between gap-3">
+                          <span>{SCREEN[s.screen] ?? s.screen}</span>
+                          <span className="tabular text-muted-foreground">
+                            {fmtInt(s.visits)} visits · {fmtMinutes(s.minutes)}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">No screen activity recorded.</p>
+                  )}
+                </div>
+                <div>
+                  <div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">Devices</div>
+                  {profile.activity.devices.length ? (
+                    <ul className="space-y-2 text-sm">
+                      {profile.activity.devices.map((d, i) => (
+                        <li key={i} className="flex justify-between gap-3">
+                          <span className="capitalize">
+                            {d.device ?? 'unknown'} {d.appVersion && <span className="text-muted-foreground">· v{d.appVersion}</span>}
+                          </span>
+                          <span className="text-muted-foreground">{fmtAgo(d.lastSeen)}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">No app sessions recorded.</p>
+                  )}
+                  <p className="mt-3 text-xs text-muted-foreground">{fmtMinutes(profile.activity.appMinutes30d)} in the app in 30 days</p>
+                </div>
+              </div>
+            </Card>
+          )}
+        </div>
+      )}
+
+      {tab === 'profile' && profile && (
+        <div className="grid gap-6 lg:grid-cols-2">
+          <Card title="Account" className="lg:col-span-2">
+            <Fields row={profile.account} />
+          </Card>
+          <Card title="Profile details">
+            <Fields row={profile.details} skip={['id', 'user_id']} />
+          </Card>
+          <Card title="Languages">
+            <div className="space-y-4 text-sm">
+              <div>
+                <div className="mb-1 text-xs text-muted-foreground">Speaks</div>
+                {profile.languages.speaks.length ? <RowsTable rows={profile.languages.speaks} empty="" /> : <p className="text-muted-foreground">Not recorded.</p>}
+              </div>
+              <div>
+                <div className="mb-1 text-xs text-muted-foreground">Learning</div>
+                {profile.languages.learns.length ? <RowsTable rows={profile.languages.learns} empty="" /> : <p className="text-muted-foreground">Not recorded.</p>}
+              </div>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {tab === 'classes' && (
+        <Card padded={false}>
+          {detail.data.classes.length ? (
+            <Table head={['Class', 'Lesson', 'Status', 'Used / total', 'Left', 'Started']}>
+              {detail.data.classes.map((c) => (
+                <tr key={c.id} className="border-b transition-colors hover:bg-muted/50">
+                  <Td>
+                    <Link className="font-medium text-primary hover:underline" to={`/tutor/classes/${c.id}`}>
+                      #{c.id}
+                    </Link>
+                  </Td>
+                  <Td>{c.lesson_topic ?? <span className="text-muted-foreground">Not started yet</span>}</Td>
+                  <Td>
+                    <Badge tone={statusTone(c.status)}>{c.status ?? 'unknown'}</Badge>
+                  </Td>
+                  <Td className="tabular whitespace-nowrap">
+                    {fmtMinutes(c.time_spent)} / {fmtMinutes(c.total_minutes)}
+                  </Td>
+                  <Td className="tabular">{fmtMinutes(c.remaining_minutes)}</Td>
+                  <Td className="whitespace-nowrap">{fmtDateTime(c.created_at)}</Td>
+                </tr>
+              ))}
+            </Table>
+          ) : (
+            <Empty title="No AI tutor classes yet" icon={<CalendarDays />} />
+          )}
+        </Card>
+      )}
+
+      {tab === 'bookings' && profile && (
+        <div className="space-y-6">
+          <Card title="Course bookings" padded={false}>
+            <RowsTable rows={profile.bookings} empty="No course bookings (or the bookings table isn’t in this database)." />
+          </Card>
+          <Card title="Subscriptions" padded={false}>
+            <RowsTable rows={profile.subscriptions} empty="No subscriptions." />
+          </Card>
+        </div>
+      )}
+
+      {tab === 'memory' && (
+        <Card
+          title={
+            <span className="inline-flex items-center gap-2">
+              <Brain className="size-4 text-violet" aria-hidden /> What the tutor remembers
+            </span>
+          }
+          actions={
+            <>
+              {can('tutor.memory.read') && !memory && (
+                <Button size="sm" onClick={viewMemory}>
+                  View
+                </Button>
+              )}
+              {can('tutor.memory.erase') && (
+                <Button size="sm" variant="danger" icon={<Trash2 />} onClick={eraseMemory}>
+                  Erase
+                </Button>
+              )}
+            </>
+          }
+        >
+          {!memory ? (
+            <p className="text-sm text-muted-foreground">
+              {detail.data.memory
+                ? `Profile version ${detail.data.memory.version}, updated ${fmtDateTime(detail.data.memory.updatedAt)}${detail.data.memory.erasedAt ? ` · last erased ${fmtDateTime(detail.data.memory.erasedAt)}` : ''}. Viewing it asks for a reason.`
+                : 'The tutor has no memory of this learner yet.'}
+            </p>
+          ) : (
+            <div className="space-y-4 text-sm">
+              {!memory.profile || !Object.keys(memory.profile.memory ?? {}).length ? (
+                <p className="text-muted-foreground">The profile is empty.</p>
+              ) : (
+                <>
+                  {!!memory.profile.memory.facts?.length && (
+                    <div>
+                      <div className="text-xs text-muted-foreground">Facts</div>
+                      <p>{memory.profile.memory.facts.join(' · ')}</p>
+                    </div>
+                  )}
+                  {Object.entries(memory.profile.memory.languages ?? {}).map(([lang, m]) => (
+                    <div key={lang} className="rounded-lg bg-muted p-3">
+                      <div className="font-medium">
+                        {lang} · {m.level ?? 'level unknown'}
+                      </div>
+                      {m.strengths?.length ? <div className="text-ink-2">Strong: {m.strengths.join(', ')}</div> : null}
+                      {m.struggles?.length ? <div className="text-ink-2">Struggles: {m.struggles.join(', ')}</div> : null}
+                      {m.practice_next?.length ? <div className="text-ink-2">Practise next: {m.practice_next.join(', ')}</div> : null}
+                    </div>
+                  ))}
+                </>
+              )}
+              <div>
+                <div className="mb-1 text-xs text-muted-foreground">Class summaries ({memory.summaries.length})</div>
+                <ul className="space-y-2">
+                  {memory.summaries.map((s) => (
+                    <li key={s.id} className="rounded-lg border p-2">
+                      <div className="text-xs text-muted-foreground">
+                        Class #{s.classId} · {s.language ?? '—'} · {fmtDateTime(s.updatedAt)}
+                      </div>
+                      <p className="text-ink-2">{s.summary}</p>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          )}
+        </Card>
+      )}
     </>
   )
 }

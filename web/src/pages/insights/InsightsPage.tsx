@@ -25,7 +25,7 @@ function Highlights() {
   return (
     <ul className="mb-6 grid gap-2 md:grid-cols-2">
       {highlights.data.map((h, i) => (
-        <li key={i} className="flex items-start gap-2 rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink-2">
+        <li key={i} className="flex items-start gap-2 rounded-xl border bg-card px-4 py-3 text-sm text-ink-2 shadow-xs">
           {h.tone === 'up' ? (
             <TrendingUp className="mt-0.5 size-4 shrink-0 text-success" aria-label="up" />
           ) : h.tone === 'down' ? (
@@ -66,7 +66,7 @@ export function InsightsPage() {
         }
       />
       <Highlights />
-      <div className="mb-5 flex gap-1 overflow-x-auto border-b border-line" role="tablist">
+      <div className="mb-6 inline-flex max-w-full gap-1 overflow-x-auto rounded-lg bg-muted p-1" role="tablist">
         {tabs
           .filter((t) => t.show)
           .map((t) => (
@@ -74,8 +74,8 @@ export function InsightsPage() {
               key={t.key}
               to={`/insights/${t.key}?days=${days}`}
               className={cx(
-                '-mb-px whitespace-nowrap border-b-2 px-3 py-2 text-sm font-medium',
-                current.key === t.key ? 'border-primary text-primary' : 'border-transparent text-ink-3 hover:text-ink'
+                'whitespace-nowrap rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
+                current.key === t.key ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
               )}
             >
               {t.label}

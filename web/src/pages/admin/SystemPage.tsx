@@ -32,14 +32,14 @@ export function SystemPage() {
               <div className="flex items-center gap-2">
                 {c.ok ? <CheckCircle2 className="size-5 text-success" aria-hidden /> : <XCircle className="size-5 text-danger" aria-hidden />}
                 <span className="font-medium">{c.name}</span>
-                <span className="ml-auto text-sm text-ink-3">{c.ok ? 'Healthy' : 'Down'}</span>
+                <span className="ml-auto text-sm text-muted-foreground">{c.ok ? 'Healthy' : 'Down'}</span>
               </div>
               <p className="tabular mt-2 text-sm text-ink-2">{c.ms} ms{c.detail ? ` · ${c.detail}` : ''}</p>
             </Card>
           ))}
         </div>
       )}
-      {health.data && <p className="mt-4 text-xs text-ink-3">Checked {fmtDateTime(health.data.time)}. Refreshes every 30 seconds.</p>}
+      {health.data && <p className="mt-4 text-xs text-muted-foreground">Checked {fmtDateTime(health.data.time)}. Refreshes every 30 seconds.</p>}
     </>
   )
 }

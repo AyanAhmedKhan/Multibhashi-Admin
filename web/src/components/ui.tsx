@@ -1,144 +1,163 @@
-import { useEffect, useId, useRef, type ButtonHTMLAttributes, type ReactNode } from 'react'
-import { AlertTriangle, ChevronLeft, ChevronRight, Loader2, X } from 'lucide-react'
+/**
+ * The console's building blocks, on shadcn/ui (Radix). Screens import from here, so the
+ * look and behaviour (focus traps, keyboard support, theming) live in one place.
+ */
+import { useId, type ButtonHTMLAttributes, type ReactNode } from 'react'
+import { AlertTriangle, ChevronLeft, ChevronRight, Inbox, Loader2 } from 'lucide-react'
+import { Button as UIButton } from '@/components/ui/button'
+import { Badge as UIBadge } from '@/components/ui/badge'
+import { Card as UICard, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Input as UIInput } from '@/components/ui/input'
+import { Textarea as UITextarea } from '@/components/ui/textarea'
+import { Label } from '@/components/ui/label'
+import { Skeleton } from '@/components/ui/skeleton'
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Table as UITable, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { Tabs as UITabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { cn } from '@/lib/utils'
 import { ApiError } from '../lib/api'
 
-const cx = (...parts: (string | false | null | undefined)[]) => parts.filter(Boolean).join(' ')
+export const cx = cn
 
-type Variant = 'primary' | 'secondary' | 'ghost' | 'danger'
+type Variant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'outline'
+const VARIANT = { primary: 'default', secondary: 'outline', outline: 'outline', ghost: 'ghost', danger: 'destructive' } as const
 
 export function Button({
   variant = 'secondary',
   size = 'md',
   loading,
   icon,
-  className,
   children,
   disabled,
   ...props
-}: ButtonHTMLAttributes<HTMLButtonElement> & {
-  variant?: Variant
-  size?: 'sm' | 'md'
-  loading?: boolean
-  icon?: ReactNode
-}) {
-  const styles: Record<Variant, string> = {
-    primary: 'bg-primary text-white hover:bg-primary-strong border-transparent dark:text-[#0b1220]',
-    secondary: 'bg-surface text-ink border-line hover:bg-surface-2',
-    ghost: 'bg-transparent text-ink-2 border-transparent hover:bg-surface-2',
-    danger: 'bg-danger text-white border-transparent hover:opacity-90 dark:text-[#0b1220]',
-  }
+}: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: Variant; size?: 'sm' | 'md' | 'lg'; loading?: boolean; icon?: ReactNode }) {
+  const iconOnly = !children
   return (
-    <button
-      className={cx(
-        'inline-flex items-center justify-center gap-2 rounded-lg border font-medium transition-colors',
-        'disabled:cursor-not-allowed disabled:opacity-50',
-        size === 'sm' ? 'h-8 px-3 text-[13px]' : 'h-10 px-4 text-sm',
-        styles[variant],
-        className
-      )}
+    <UIButton
+      variant={VARIANT[variant]}
+      size={iconOnly ? (size === 'sm' ? 'icon-sm' : 'icon') : size === 'md' ? 'default' : size}
       disabled={disabled || loading}
       {...props}
     >
-      {loading ? <Loader2 className="size-4 animate-spin" aria-hidden /> : icon}
+      {loading ? <Loader2 className="animate-spin" aria-hidden /> : icon}
       {children}
-    </button>
+    </UIButton>
   )
 }
 
-export function Card({ title, actions, children, className, padded = true }: {
+export function Card({
+  title,
+  description,
+  actions,
+  children,
+  className,
+  padded = true,
+}: {
   title?: ReactNode
+  description?: ReactNode
   actions?: ReactNode
   children: ReactNode
   className?: string
   padded?: boolean
 }) {
   return (
-    <section className={cx('min-w-0 rounded-xl border border-line bg-surface', className)}>
+    <UICard className={cn('min-w-0 gap-0 py-0', className)}>
       {(title || actions) && (
-        <header className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-5 py-3">
-          <h2 className="text-[15px] font-semibold text-ink">{title}</h2>
-          {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
-        </header>
+        <CardHeader className="border-b px-5 py-4 [.border-b]:pb-4">
+          {title && <CardTitle className="text-[15px]">{title}</CardTitle>}
+          {description && <CardDescription>{description}</CardDescription>}
+          {actions && <CardAction className="flex flex-wrap items-center gap-2">{actions}</CardAction>}
+        </CardHeader>
       )}
-      <div className={padded ? 'p-5' : ''}>{children}</div>
-    </section>
+      <CardContent className={padded ? 'p-5' : 'p-0'}>{children}</CardContent>
+    </UICard>
   )
 }
 
-const tones = {
-  neutral: 'bg-surface-2 text-ink-2',
-  blue: 'bg-primary-soft text-primary-strong',
-  green: 'bg-success-soft text-success',
-  amber: 'bg-warning-soft text-warning',
-  red: 'bg-danger-soft text-danger',
-  violet: 'bg-violet-soft text-violet',
+const TONE = {
+  neutral: 'border-transparent bg-muted text-muted-foreground',
+  blue: 'border-transparent bg-accent text-accent-foreground',
+  green: 'border-transparent bg-success-soft text-success',
+  amber: 'border-transparent bg-warning-soft text-warning',
+  red: 'border-transparent bg-danger-soft text-danger',
+  violet: 'border-transparent bg-violet-soft text-violet',
 }
-export type Tone = keyof typeof tones
+export type Tone = keyof typeof TONE
 
-export function Badge({ tone = 'neutral', children }: { tone?: Tone; children: ReactNode }) {
-  return (
-    <span className={cx('inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium', tones[tone])}>
-      {children}
-    </span>
-  )
+export function Badge({ tone = 'neutral', children, className }: { tone?: Tone; children: ReactNode; className?: string }) {
+  return <UIBadge className={cn('gap-1 font-medium', TONE[tone], className)}>{children}</UIBadge>
 }
 
 export function PageHeader({ title, subtitle, actions }: { title: string; subtitle?: ReactNode; actions?: ReactNode }) {
   return (
     <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
-      <div>
-        <h1 className="text-xl font-semibold tracking-tight text-ink sm:text-2xl">{title}</h1>
-        {subtitle && <p className="mt-1 max-w-3xl text-sm text-ink-3">{subtitle}</p>}
+      <div className="min-w-0">
+        <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
+        {subtitle && <p className="mt-1 max-w-3xl text-sm text-muted-foreground">{subtitle}</p>}
       </div>
       {actions && <div className="flex flex-wrap gap-2">{actions}</div>}
     </div>
   )
 }
 
-export function Stat({ label, value, hint, tone }: { label: string; value: ReactNode; hint?: ReactNode; tone?: Tone }) {
+export function Stat({ label, value, hint, tone, icon }: { label: string; value: ReactNode; hint?: ReactNode; tone?: Tone; icon?: ReactNode }) {
   return (
-    <div className="rounded-xl border border-line bg-surface p-4">
-      <div className="text-[13px] text-ink-3">{label}</div>
-      <div className={cx('tabular mt-1 text-2xl font-semibold', tone === 'red' ? 'text-danger' : tone === 'amber' ? 'text-warning' : 'text-ink')}>
+    <UICard className="gap-1 px-4 py-4">
+      <div className="flex items-center justify-between gap-2 text-[13px] text-muted-foreground">
+        <span>{label}</span>
+        {icon && <span className="text-muted-foreground/70 [&_svg]:size-4">{icon}</span>}
+      </div>
+      <div className={cn('tabular text-2xl font-semibold tracking-tight', tone === 'red' ? 'text-danger' : tone === 'amber' ? 'text-warning' : 'text-foreground')}>
         {value}
       </div>
-      {hint && <div className="mt-1 text-xs text-ink-3">{hint}</div>}
-    </div>
+      {hint && <div className="text-xs text-muted-foreground">{hint}</div>}
+    </UICard>
   )
 }
 
 export function Field({ label, hint, error, children }: { label: string; hint?: ReactNode; error?: string; children: (id: string) => ReactNode }) {
   const id = useId()
   return (
-    <div className="space-y-1.5">
-      <label htmlFor={id} className="block text-[13px] font-medium text-ink-2">
+    <div className="grid gap-1.5">
+      <Label htmlFor={id} className="text-[13px] text-ink-2">
         {label}
-      </label>
+      </Label>
       {children(id)}
-      {error ? <p className="text-xs text-danger">{error}</p> : hint ? <p className="text-xs text-ink-3">{hint}</p> : null}
+      {error ? <p className="text-xs text-destructive">{error}</p> : hint ? <p className="text-xs text-muted-foreground">{hint}</p> : null}
     </div>
   )
 }
 
-const inputClass =
-  'w-full rounded-lg border border-line bg-surface px-3 text-sm text-ink placeholder:text-ink-3 focus:border-primary focus:outline-none'
-
 export function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
-  return <input {...props} className={cx(inputClass, 'h-10', props.className)} />
+  return <UIInput {...props} className={cn('h-9', props.className)} />
 }
 
 export function Textarea(props: React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
-  return <textarea {...props} className={cx(inputClass, 'min-h-20 py-2', props.className)} />
+  return <UITextarea {...props} className={cn('min-h-20', props.className)} />
 }
 
+/** A native select styled like the shadcn inputs (keeps forms simple and mobile-friendly). */
 export function Select(props: React.SelectHTMLAttributes<HTMLSelectElement>) {
-  return <select {...props} className={cx(inputClass, 'h-10 pr-8', props.className)} />
+  return (
+    <select
+      {...props}
+      className={cn(
+        'h-9 w-full min-w-0 rounded-md border border-input bg-transparent px-3 text-sm shadow-xs outline-none transition-[color,box-shadow]',
+        'focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-input/30',
+        props.className
+      )}
+    />
+  )
 }
 
-export function Spinner({ label = 'Loading…' }: { label?: string }) {
+/** Loading placeholder shaped like content (rows of text). */
+export function Spinner({ label = 'Loading', rows = 4 }: { label?: string; rows?: number }) {
   return (
-    <div className="flex items-center gap-2 py-10 text-sm text-ink-3" role="status">
-      <Loader2 className="size-4 animate-spin" aria-hidden /> {label}
+    <div className="space-y-3 p-5" role="status" aria-label={label}>
+      {Array.from({ length: rows }, (_, i) => (
+        <Skeleton key={i} className={cn('h-4', i % 3 === 2 ? 'w-2/3' : 'w-full')} />
+      ))}
     </div>
   )
 }
@@ -148,130 +167,126 @@ export function ErrorNote({ error }: { error: unknown }) {
   const message = error instanceof ApiError ? error.message : 'Something went wrong.'
   const forbidden = error instanceof ApiError && error.code === 'FORBIDDEN'
   return (
-    <div className="flex items-start gap-2 rounded-lg border border-line bg-danger-soft px-3 py-2 text-sm text-danger" role="alert">
-      <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden />
-      <span>{forbidden ? 'You don’t have access to this. Ask a Super Admin if you need it.' : message}</span>
-    </div>
+    <Alert variant="destructive" className="my-2">
+      <AlertTriangle aria-hidden />
+      <AlertDescription>{forbidden ? 'You don’t have access to this. Ask a Super Admin if you need it.' : message}</AlertDescription>
+    </Alert>
   )
 }
 
-export function Empty({ title, children }: { title: string; children?: ReactNode }) {
+export function Empty({ title, children, icon }: { title: string; children?: ReactNode; icon?: ReactNode }) {
   return (
-    <div className="px-6 py-12 text-center">
-      <p className="text-sm font-medium text-ink">{title}</p>
-      {children && <p className="mx-auto mt-1 max-w-md text-sm text-ink-3">{children}</p>}
+    <div className="flex flex-col items-center px-6 py-12 text-center">
+      <div className="mb-3 grid size-10 place-items-center rounded-full bg-muted text-muted-foreground [&_svg]:size-5">{icon ?? <Inbox />}</div>
+      <p className="text-sm font-medium">{title}</p>
+      {children && <p className="mt-1 max-w-md text-sm text-muted-foreground">{children}</p>}
     </div>
   )
 }
 
-/** Horizontally scrolling table (never the page) on narrow screens. */
+/** A table that scrolls sideways inside its card, never the page. */
 export function Table({ head, children }: { head: ReactNode[]; children: ReactNode }) {
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full border-collapse text-left text-sm">
-        <thead>
-          <tr className="border-b border-line text-xs uppercase tracking-wide text-ink-3">
-            {head.map((h, i) => (
-              <th key={i} className="whitespace-nowrap px-4 py-2.5 font-medium">
-                {h}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-line">{children}</tbody>
-      </table>
-    </div>
+    <UITable>
+      <TableHeader>
+        <TableRow className="hover:bg-transparent">
+          {head.map((h, i) => (
+            <TableHead key={i} className="h-10 px-4 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              {h}
+            </TableHead>
+          ))}
+        </TableRow>
+      </TableHeader>
+      <TableBody>{children}</TableBody>
+    </UITable>
   )
 }
 
 export function Td({ children, className }: { children: ReactNode; className?: string }) {
-  return <td className={cx('px-4 py-3 align-top text-ink', className)}>{children}</td>
+  return <TableCell className={cn('px-4 py-3 align-top whitespace-normal', className)}>{children}</TableCell>
 }
 
 export function Pagination({ page, lastPage, total, onPage }: { page: number; lastPage: number; total: number; onPage: (p: number) => void }) {
-  if (lastPage <= 1) return <div className="px-4 py-3 text-xs text-ink-3">{total.toLocaleString('en-IN')} total</div>
   return (
-    <div className="flex items-center justify-between border-t border-line px-4 py-3 text-xs text-ink-3">
+    <div className="flex items-center justify-between border-t px-4 py-3 text-xs text-muted-foreground">
       <span>
-        Page {page} of {lastPage} · {total.toLocaleString('en-IN')} total
+        {lastPage > 1 ? `Page ${page} of ${lastPage} · ` : ''}
+        {total.toLocaleString('en-IN')} total
       </span>
-      <div className="flex gap-1">
-        <Button size="sm" variant="ghost" disabled={page <= 1} onClick={() => onPage(page - 1)} aria-label="Previous page" icon={<ChevronLeft className="size-4" />} />
-        <Button size="sm" variant="ghost" disabled={page >= lastPage} onClick={() => onPage(page + 1)} aria-label="Next page" icon={<ChevronRight className="size-4" />} />
-      </div>
+      {lastPage > 1 && (
+        <div className="flex gap-1">
+          <Button size="sm" variant="outline" disabled={page <= 1} onClick={() => onPage(page - 1)} aria-label="Previous page" icon={<ChevronLeft />} />
+          <Button size="sm" variant="outline" disabled={page >= lastPage} onClick={() => onPage(page + 1)} aria-label="Next page" icon={<ChevronRight />} />
+        </div>
+      )}
     </div>
   )
 }
 
-export function Modal({ open, title, onClose, children, footer, wide }: {
+export function Modal({
+  open,
+  title,
+  description,
+  onClose,
+  children,
+  footer,
+  wide,
+}: {
   open: boolean
   title: string
+  description?: ReactNode
   onClose: () => void
   children: ReactNode
   footer?: ReactNode
   wide?: boolean
 }) {
-  const ref = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    if (!open) return
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
-    window.addEventListener('keydown', onKey)
-    ref.current?.querySelector<HTMLElement>('input, textarea, select, button')?.focus()
-    return () => window.removeEventListener('keydown', onKey)
-  }, [open, onClose])
-  if (!open) return null
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-0 sm:items-center sm:p-4" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div
-        ref={ref}
-        role="dialog"
-        aria-modal="true"
-        aria-label={title}
-        className={cx('max-h-[92vh] w-full overflow-y-auto rounded-t-2xl border border-line bg-surface shadow-xl sm:rounded-2xl', wide ? 'sm:max-w-3xl' : 'sm:max-w-md')}
+    <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
+      <DialogContent
+        className={cn('max-h-[92vh] overflow-y-auto', wide ? 'sm:max-w-3xl' : 'sm:max-w-md')}
+        // Forms don't vanish on a stray click, and a dialog opened on top of another (the
+        // "reason" prompt over Give AI Pro) must not count as clicking outside it.
+        onInteractOutside={(e) => e.preventDefault()}
       >
-        <div className="flex items-center justify-between border-b border-line px-5 py-3">
-          <h2 className="text-[15px] font-semibold">{title}</h2>
-          <Button variant="ghost" size="sm" onClick={onClose} aria-label="Close" icon={<X className="size-4" />} />
-        </div>
-        <div className="space-y-4 px-5 py-4">{children}</div>
-        {footer && <div className="flex flex-wrap justify-end gap-2 border-t border-line px-5 py-3">{footer}</div>}
-      </div>
-    </div>
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+          {description && <DialogDescription>{description}</DialogDescription>}
+        </DialogHeader>
+        <div className="space-y-4">{children}</div>
+        {footer && <DialogFooter className="gap-2">{footer}</DialogFooter>}
+      </DialogContent>
+    </Dialog>
   )
 }
 
 export function Tabs<T extends string>({ value, onChange, items }: { value: T; onChange: (v: T) => void; items: { value: T; label: ReactNode }[] }) {
   return (
-    <div className="mb-4 flex gap-1 overflow-x-auto border-b border-line" role="tablist">
-      {items.map((item) => (
-        <button
-          key={item.value}
-          role="tab"
-          aria-selected={value === item.value}
-          onClick={() => onChange(item.value)}
-          className={cx(
-            '-mb-px whitespace-nowrap border-b-2 px-3 py-2 text-sm font-medium',
-            value === item.value ? 'border-primary text-primary' : 'border-transparent text-ink-3 hover:text-ink'
-          )}
-        >
-          {item.label}
-        </button>
-      ))}
-    </div>
+    <UITabs value={value} onValueChange={(v) => onChange(v as T)} className="mb-4 min-w-0">
+      {/* Scrolls on its own on narrow screens instead of widening the page */}
+      <div className="-mx-1 overflow-x-auto px-1 pb-1">
+        <TabsList className="w-max">
+          {items.map((item) => (
+            <TabsTrigger key={item.value} value={item.value}>
+              {item.label}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+      </div>
+    </UITabs>
   )
 }
 
 export function KeyValue({ items }: { items: [ReactNode, ReactNode][] }) {
   return (
-    <dl className="grid grid-cols-1 gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
+    <dl className="grid grid-cols-1 gap-x-6 gap-y-4 text-sm sm:grid-cols-2">
       {items.map(([k, v], i) => (
         <div key={i} className="min-w-0">
-          <dt className="text-xs text-ink-3">{k}</dt>
-          <dd className="mt-0.5 break-words text-ink">{v}</dd>
+          <dt className="text-xs text-muted-foreground">{k}</dt>
+          <dd className="mt-0.5 wrap-break-word">{v}</dd>
         </div>
       ))}
     </dl>
   )
 }
 
-export { cx }
+export { Skeleton }

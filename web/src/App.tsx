@@ -37,9 +37,9 @@ function Gate({ permission, children }: { permission: string; children: ReactNod
   const { can } = useAuth()
   if (!can(permission)) {
     return (
-      <div className="rounded-xl border border-line bg-surface p-8 text-center">
+      <div className="rounded-xl border border-border bg-card p-8 text-center">
         <p className="font-medium">You don’t have access to this page.</p>
-        <p className="mt-1 text-sm text-ink-3">It needs the “{permission}” permission. A Super Admin can grant it through a role.</p>
+        <p className="mt-1 text-sm text-muted-foreground">It needs the “{permission}” permission. A Super Admin can grant it through a role.</p>
       </div>
     )
   }

@@ -4,6 +4,9 @@ import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { Search } from 'lucide-react'
 import { api, type Paginated } from '../../lib/api'
 import { fmtDateTime, fmtInt, fmtMinutes } from '../../lib/format'
+import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import { useAuth } from '../../lib/auth'
+import { initials } from '../admin/StaffPage'
 import { Card, Empty, ErrorNote, Input, PageHeader, Pagination, Spinner, Table, Td } from '../../components/ui'
 
 interface LearnerRow {
@@ -18,6 +21,7 @@ interface LearnerRow {
 }
 
 export function LearnersPage() {
+  const { can } = useAuth()
   const [params, setParams] = useSearchParams()
   const [q, setQ] = useState(params.get('q') ?? '')
   const page = Number(params.get('page') ?? 1)
@@ -32,17 +36,17 @@ export function LearnersPage() {
     <>
       <PageHeader
         title="Learners"
-        subtitle="Search by learner id, the last 4+ digits of a phone number, a name or an email. Contact details stay masked until you reveal them (audited)."
+        subtitle={can('learners.pii.read') ? 'Search by learner id, the last 4+ digits of a phone number, a name or an email.' : 'Search by learner id, phone digits, name or email. Contact details are masked for your role.'}
       />
       <Card padded={false}>
         <form
-          className="relative border-b border-line p-4"
+          className="relative border-b border-border p-4"
           onSubmit={(e) => {
             e.preventDefault()
             setParams(q ? { q } : {})
           }}
         >
-          <Search className="pointer-events-none absolute left-7 top-7 size-4 text-ink-3" aria-hidden />
+          <Search className="pointer-events-none absolute left-7 top-7 size-4 text-muted-foreground" aria-hidden />
           <Input aria-label="Search learners" className="pl-9" placeholder="e.g. 5023, 43210, Priya, priya@…" value={q} onChange={(e) => setQ(e.target.value)} />
         </form>
         <ErrorNote error={learners.error} />
@@ -54,12 +58,17 @@ export function LearnersPage() {
           <>
             <Table head={['Learner', 'Phone', 'Email', 'AI classes', 'Minutes used', 'Last class', 'Joined']}>
               {learners.data.data.map((l) => (
-                <tr key={l.id} className="hover:bg-surface-2">
+                <tr key={l.id} className="border-b transition-colors hover:bg-muted/50">
                   <Td>
-                    <Link to={`/learners/${l.id}`} className="font-medium text-primary">
-                      {l.name ?? 'Unnamed'}
+                    <Link to={`/learners/${l.id}`} className="flex items-center gap-3">
+                      <Avatar className="size-8">
+                        <AvatarFallback className="bg-accent text-xs font-semibold text-accent-foreground">{l.name ? initials(l.name) : '#'}</AvatarFallback>
+                      </Avatar>
+                      <span>
+                        <span className="block font-medium hover:underline">{l.name ?? 'Unnamed'}</span>
+                        <span className="block text-xs text-muted-foreground">#{l.id}</span>
+                      </span>
                     </Link>
-                    <div className="text-xs text-ink-3">#{l.id}</div>
                   </Td>
                   <Td className="tabular">{l.phone ?? '—'}</Td>
                   <Td>{l.email ?? '—'}</Td>

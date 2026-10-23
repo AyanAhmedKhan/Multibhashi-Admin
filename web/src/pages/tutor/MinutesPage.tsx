@@ -103,7 +103,7 @@ export function MinutesPage() {
                     </Td>
                     <Td>
                       <Badge tone={l.source?.startsWith('console_') || l.source === 'manual_grant' ? 'violet' : l.source === 'free' ? 'green' : 'blue'}>{l.source ?? '—'}</Badge>
-                      {l.source && SOURCE_HELP[l.source] && <div className="mt-0.5 text-xs text-ink-3">{SOURCE_HELP[l.source]}</div>}
+                      {l.source && SOURCE_HELP[l.source] && <div className="mt-0.5 text-xs text-muted-foreground">{SOURCE_HELP[l.source]}</div>}
                     </Td>
                     <Td className="tabular">{l.minutes_added > 0 ? '+' : ''}{l.minutes_added}</Td>
                     <Td className="tabular">{l.new_total}</Td>
@@ -138,7 +138,7 @@ export function MinutesPage() {
             )}
           </Card>
           <Card title="Most grants, last 24 h">
-            <p className="mb-3 text-xs text-ink-3">A learner at the daily cap many days running may be farming free classes.</p>
+            <p className="mb-3 text-xs text-muted-foreground">A learner at the daily cap many days running may be farming free classes.</p>
             <ul className="space-y-2 text-sm">
               {(free.data?.topLast24h ?? []).map((t) => (
                 <li key={t.userId} className="flex justify-between">

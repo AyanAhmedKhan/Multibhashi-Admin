@@ -40,11 +40,11 @@ export function TutorTab({ days }: { days: number }) {
       <div className="grid gap-6 lg:grid-cols-2">
         <Card title="Languages taught">
           <RankList rows={d.languages.map((l) => ({ label: LANG[l.language] ?? l.language, value: l.classes }))} unit="classes" />
-          <p className="mt-3 text-xs text-ink-3">From class summaries (classes the tutor summarised).</p>
+          <p className="mt-3 text-xs text-muted-foreground">From class summaries (classes the tutor summarised).</p>
         </Card>
         <Card title="Where the minutes came from">
           <RankList rows={d.minutesMix.map((m) => ({ label: m.kind, value: m.minutes }))} unit="min" />
-          <p className="mt-3 text-xs text-ink-3">Free = free classes; paid = purchases; complimentary = staff grants and AI Pro given without payment.</p>
+          <p className="mt-3 text-xs text-muted-foreground">Free = free classes; paid = purchases; complimentary = staff grants and AI Pro given without payment.</p>
         </Card>
       </div>
       <ChartCard

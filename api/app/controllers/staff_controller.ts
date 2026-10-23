@@ -1,6 +1,6 @@
 import type { HttpContext } from '@adonisjs/core/http'
 import staffService from '#services/staff_service'
-import { inviteValidator, listValidator, reasonValidator, renameValidator, rolesValidator } from '#validators/console'
+import { inviteValidator, listValidator, reasonValidator, reissueValidator, renameValidator, rolesValidator } from '#validators/console'
 
 export default class StaffController {
   async index({ request }: HttpContext) {
@@ -14,7 +14,7 @@ export default class StaffController {
 
   async invite({ request, actor }: HttpContext) {
     const input = await request.validateUsing(inviteValidator)
-    return staffService.invite(actor, { email: input.email, name: input.name, roleIds: input.roles, reason: input.reason })
+    return staffService.invite(actor, { email: input.email, name: input.name, roleIds: input.roles, reason: input.reason, sendEmail: input.send_email })
   }
 
   async rename({ request, actor, params }: HttpContext) {
@@ -40,6 +40,11 @@ export default class StaffController {
   async resetAccess({ request, actor, params }: HttpContext) {
     const { reason } = await request.validateUsing(reasonValidator)
     return staffService.resetAccess(actor, Number(params.id), reason)
+  }
+
+  async reissueInvite({ actor, params, request }: HttpContext) {
+    const { send_email: sendEmail } = await request.validateUsing(reissueValidator)
+    return staffService.reissueInvite(actor, Number(params.id), sendEmail)
   }
 
   async revokeSessions({ request, actor, params }: HttpContext) {

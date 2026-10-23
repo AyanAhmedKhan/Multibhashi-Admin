@@ -5,6 +5,8 @@ import env from '#start/env'
  * thresholds, IP allowlist) lives in console_settings so a super admin can change it
  * on the Security page; `defaults` are used until then.
  */
+export type MfaMethod = 'email' | 'totp' | 'off'
+
 const consoleConfig = {
   origins: env
     .get('CONSOLE_ORIGINS')
@@ -33,6 +35,8 @@ const consoleConfig = {
 
   /** Defaults for console_settings (see SettingsService). */
   defaults: {
+    /** Second sign-in step: a code by email (default), an authenticator app, or none. */
+    mfa_method: 'email' as MfaMethod,
     session_idle_minutes: 30,
     session_absolute_hours: 12,
     step_up_minutes: 10,

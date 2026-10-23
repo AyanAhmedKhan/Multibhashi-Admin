@@ -2,6 +2,9 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, ty
 import { ShieldCheck } from 'lucide-react'
 import { api, ApiError, onStepUp } from '../lib/api'
 import { Button, ErrorNote, Field, Input, Modal, Textarea } from './ui'
+import { CodeInput, codeReady } from './code-input'
+import { ResendCode } from './resend-code'
+import { useAuth } from '../lib/auth'
 
 /**
  * Two dialogs every page shares:
@@ -23,6 +26,12 @@ interface ReasonRequest {
 const ReasonContext = createContext<((req: ReasonRequest) => void) | null>(null)
 
 export function DialogsProvider({ children }: { children: ReactNode }) {
+  const { me } = useAuth()
+  const method = me?.policy.mfaMethod ?? 'totp'
+  const methodRef = useRef(method)
+  methodRef.current = method
+  const [sentTo, setSentTo] = useState<string | null>(null)
+  const [password, setPassword] = useState('')
   // --- step-up
   const [stepUpOpen, setStepUpOpen] = useState(false)
   const [code, setCode] = useState('')
@@ -36,8 +45,16 @@ export function DialogsProvider({ children }: { children: ReactNode }) {
         new Promise<boolean>((resolve) => {
           resolver.current = resolve
           setCode('')
+          setPassword('')
           setStepError(null)
+          setSentTo(null)
           setStepUpOpen(true)
+          if (methodRef.current === 'email') {
+            api
+              .post<{ sentTo: string | null }>('auth/step-up/send')
+              .then((res) => setSentTo(res.sentTo))
+              .catch((error) => setStepError(error))
+          }
         })
     )
   }, [])
@@ -48,14 +65,16 @@ export function DialogsProvider({ children }: { children: ReactNode }) {
     resolver.current = null
   }
 
-  const submitStepUp = async () => {
+  const submitStepUp = async (value = code) => {
+    if (stepBusy || (method === 'off' ? password.length < 1 : !codeReady(value))) return
     setStepBusy(true)
     setStepError(null)
     try {
-      await api.post('auth/step-up', { code })
+      await api.post('auth/step-up', method === 'off' ? { password } : { code: value })
       closeStepUp(true)
     } catch (error) {
       setStepError(error)
+      setCode('')
     } finally {
       setStepBusy(false)
     }
@@ -99,41 +118,44 @@ export function DialogsProvider({ children }: { children: ReactNode }) {
       <Modal
         open={stepUpOpen}
         title="Confirm it’s you"
+        description={
+          method === 'email'
+            ? `This action changes money, access or personal data. We emailed a 6-digit code${sentTo ? ` to ${sentTo}` : ''}.`
+            : method === 'off'
+              ? 'This action changes money, access or personal data. Enter your password again.'
+              : 'This action changes money, access or personal data. Enter the 6-digit code from your authenticator app.'
+        }
         onClose={() => closeStepUp(false)}
         footer={
           <>
             <Button variant="ghost" onClick={() => closeStepUp(false)}>
               Cancel
             </Button>
-            <Button variant="primary" loading={stepBusy} disabled={code.trim().length < 6} onClick={submitStepUp}>
+            <Button variant="primary" loading={stepBusy} disabled={method === 'off' ? !password : !codeReady(code)} icon={<ShieldCheck />} onClick={() => submitStepUp()}>
               Confirm
             </Button>
           </>
         }
       >
-        <div className="flex gap-3 text-sm text-ink-2">
-          <ShieldCheck className="mt-0.5 size-5 shrink-0 text-primary" aria-hidden />
-          <p>This action changes money, access or personal data. Enter the 6-digit code from your authenticator app (or a recovery code).</p>
-        </div>
-        <Field label="Code">
-          {(id) => (
-            <Input
-              id={id}
-              inputMode="numeric"
-              autoComplete="one-time-code"
-              value={code}
-              onChange={(e) => setCode(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && code.trim().length >= 6 && submitStepUp()}
-              placeholder="123456"
-            />
-          )}
-        </Field>
+        {method === 'off' ? (
+          <Field label="Password">
+            {(id) => (
+              <Input id={id} type="password" autoComplete="current-password" autoFocus value={password} onChange={(e) => setPassword(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submitStepUp()} />
+            )}
+          </Field>
+        ) : (
+          <>
+            <CodeInput value={code} onChange={setCode} onComplete={(v) => submitStepUp(v)} allowRecovery={method === 'totp'} />
+            {method === 'email' && <ResendCode onResend={() => api.post<{ sentTo: string | null }>('auth/step-up/send')} />}
+          </>
+        )}
         <ErrorNote error={stepError} />
       </Modal>
 
       <Modal
         open={!!req}
         title={req?.title ?? ''}
+        description={req?.description}
         onClose={() => setReq(null)}
         footer={
           <>
@@ -146,7 +168,6 @@ export function DialogsProvider({ children }: { children: ReactNode }) {
           </>
         }
       >
-        {req?.description && <div className="text-sm text-ink-2">{req.description}</div>}
         {req?.extra}
         <Field label="Reason" hint="Saved in the audit log with your name. A ticket number or one sentence is enough." error={fieldError}>
           {(id) => <Textarea id={id} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Ticket #4821: learner says the class cut off" />}

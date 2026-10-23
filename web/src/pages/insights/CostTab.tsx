@@ -127,18 +127,18 @@ export function CostTab({ days }: { days: number }) {
   return (
     <div className="space-y-6">
       {!d.recorded ? (
-        <div className="rounded-lg border border-line bg-warning-soft px-3 py-2 text-sm text-warning">
+        <div className="rounded-lg border border-border bg-warning-soft px-3 py-2 text-sm text-warning">
           <b>Estimate.</b> Per-class usage recording isn’t live yet (the tutor API’s <code>ai_tutor_session_usage</code> table). Until it is, cost = minutes ×
           the per-minute assumptions below.
         </div>
       ) : (
-        <div className="rounded-lg border border-line bg-success-soft px-3 py-2 text-sm text-success">
+        <div className="rounded-lg border border-border bg-success-soft px-3 py-2 text-sm text-success">
           <b>Exact for {d.coverage.minutesShare}% of minutes</b> ({fmtInt(d.coverage.classes)} of {fmtInt(d.classes)} classes): recorded usage × the price list.
           {d.coverage.minutesShare < 100 && ' The rest (classes without a usage record) is estimated and labelled.'}
         </div>
       )}
       {unpriced.length > 0 && (
-        <div className="rounded-lg border border-line bg-danger-soft px-3 py-2 text-sm text-danger">
+        <div className="rounded-lg border border-border bg-danger-soft px-3 py-2 text-sm text-danger">
           Usage without a price: {unpriced.map((u) => `${u.provider} ${u.model} ${u.unitLabel}`).join(', ')}. It counts as ₹0 until a price is added below.
         </div>
       )}
@@ -167,7 +167,7 @@ export function CostTab({ days }: { days: number }) {
                     <span className="text-ink-2">{s.label}</span>
                     <span className="tabular font-semibold">{inr(s.totalInr)}</span>
                   </div>
-                  <div className="text-xs text-ink-3">
+                  <div className="text-xs text-muted-foreground">
                     {s.quantity ? fmtQuantity(s.quantity, s.unit) : 'no recorded usage'}
                     {s.estimatedInr > 0 && ` · ${inr(s.estimatedInr)} estimated`}
                   </div>
@@ -175,9 +175,9 @@ export function CostTab({ days }: { days: number }) {
               ))}
             </ul>
           ) : (
-            <p className="text-sm text-ink-3">No Sarvam usage in this period.</p>
+            <p className="text-sm text-muted-foreground">No Sarvam usage in this period.</p>
           )}
-          <p className="mt-3 text-xs text-ink-3">STT is billed per audio second streamed; Bulbul TTS per character spoken.</p>
+          <p className="mt-3 text-xs text-muted-foreground">STT is billed per audio second streamed; Bulbul TTS per character spoken.</p>
         </Card>
         <Card title="By engine" className="lg:col-span-2" padded={false}>
           <Table head={['Engine', 'Classes', 'Minutes', 'Cost', '₹/min measured', '₹/min assumed']}>
@@ -188,7 +188,7 @@ export function CostTab({ days }: { days: number }) {
                 <Td className="tabular">{fmtInt(e.minutes)}</Td>
                 <Td className="tabular">{inr(e.exactInr + e.estimatedInr)}</Td>
                 <Td className="tabular">{e.measuredPerMinuteInr === null ? '—' : inr(e.measuredPerMinuteInr, 2)}</Td>
-                <Td className="tabular text-ink-3">{inr(e.assumedPerMinuteInr, 2)}</Td>
+                <Td className="tabular text-muted-foreground">{inr(e.assumedPerMinuteInr, 2)}</Td>
               </tr>
             ))}
           </Table>
@@ -201,12 +201,12 @@ export function CostTab({ days }: { days: number }) {
             <tr key={p.id} className={p.priced ? '' : 'bg-danger-soft'}>
               <Td>
                 {p.label}
-                <div className="text-xs text-ink-3">{p.model && p.model !== '*' ? p.model : 'any model'} · {p.unitLabel}</div>
+                <div className="text-xs text-muted-foreground">{p.model && p.model !== '*' ? p.model : 'any model'} · {p.unitLabel}</div>
               </Td>
               <Td>{PROVIDER_NAME[p.provider] ?? p.provider}</Td>
               <Td className="tabular whitespace-nowrap">{p.quantity ? fmtQuantity(p.quantity, p.unit) : '—'}</Td>
               <Td className="tabular">{inr(p.exactInr)}</Td>
-              <Td className="tabular text-ink-3">{inr(p.estimatedInr)}</Td>
+              <Td className="tabular text-muted-foreground">{inr(p.estimatedInr)}</Td>
               <Td className="tabular font-medium">{inr(p.totalInr)}</Td>
               <Td className="tabular">
                 {p.priced ? (
@@ -246,7 +246,7 @@ export function CostTab({ days }: { days: number }) {
                 <tr key={c.id}>
                   <Td>
                     <Link className="font-medium text-primary" to={`/tutor/classes/${c.id}`}>#{c.id}</Link>
-                    <div className="max-w-48 truncate text-xs text-ink-3">{c.topic ?? '—'}</div>
+                    <div className="max-w-48 truncate text-xs text-muted-foreground">{c.topic ?? '—'}</div>
                   </Td>
                   <Td>{c.engine}</Td>
                   <Td className="tabular">{fmtMinutes(c.minutes)}</Td>
@@ -256,7 +256,7 @@ export function CostTab({ days }: { days: number }) {
               ))}
             </Table>
           ) : (
-            <p className="p-5 text-sm text-ink-3">Shown once classes report usage.</p>
+            <p className="p-5 text-sm text-muted-foreground">Shown once classes report usage.</p>
           )}
         </Card>
         <Card
@@ -279,7 +279,7 @@ export function CostTab({ days }: { days: number }) {
               })}
             </Table>
           ) : (
-            <p className="p-5 text-sm text-ink-3">Once classes report usage, the measured values appear here; adopt them so estimates for older classes match reality.</p>
+            <p className="p-5 text-sm text-muted-foreground">Once classes report usage, the measured values appear here; adopt them so estimates for older classes match reality.</p>
           )}
         </Card>
       </div>
@@ -294,7 +294,7 @@ export function CostTab({ days }: { days: number }) {
               <Td className="whitespace-nowrap">{r.month}</Td>
               <Td>{PROVIDER_NAME[r.provider] ?? r.provider}</Td>
               <Td className="tabular">{inr(r.computedInr)}</Td>
-              <Td className="tabular text-ink-3">{inr(r.estimatedInr)}</Td>
+              <Td className="tabular text-muted-foreground">{inr(r.estimatedInr)}</Td>
               <Td className="tabular">{inr(r.billedInr)}</Td>
               <Td className="tabular">
                 {r.variancePct === null ? '—' : Math.abs(r.variancePct) > 15 ? <Badge tone="amber">{r.variancePct > 0 ? '+' : ''}{r.variancePct}%</Badge> : `${r.variancePct > 0 ? '+' : ''}${r.variancePct}%`}
@@ -303,7 +303,7 @@ export function CostTab({ days }: { days: number }) {
             </tr>
           ))}
         </Table>
-        <p className="px-4 py-3 text-xs text-ink-3">
+        <p className="px-4 py-3 text-xs text-muted-foreground">
           Sarvam has no usage API (one credit balance per organisation), so enter each month’s charge from its Billing page, and Google/LiveKit from their invoices. A gap over 15% usually means a usage figure or price needs updating.
         </p>
       </Card>
@@ -323,7 +323,7 @@ export function CostTab({ days }: { days: number }) {
             <tr key={p.id}>
               <Td>
                 {p.label}
-                {p.note && <div className="max-w-sm text-xs text-ink-3">{p.note}</div>}
+                {p.note && <div className="max-w-sm text-xs text-muted-foreground">{p.note}</div>}
               </Td>
               <Td className="text-xs text-ink-2">{p.provider} · {p.model === '*' ? 'any model' : p.model} · {p.unit}</Td>
               <Td className="tabular whitespace-nowrap">{p.currency === 'USD' ? '$' : '₹'}{p.price} / {fmtInt(p.per)}</Td>
@@ -331,7 +331,7 @@ export function CostTab({ days }: { days: number }) {
             </tr>
           ))}
         </Table>
-        <p className="px-4 py-3 text-xs text-ink-3">
+        <p className="px-4 py-3 text-xs text-muted-foreground">
           USD → INR {d.model.usdToInr} · learner price {inr(d.model.pricePerPaidMinuteInr, 2)}/min · fixed monthly {d.model.fixedMonthly.map((f) => `${f.label} ${inr(f.amountInr)}`).join(', ')} · checked {d.model.checkedOn}
           {manage && <> · <button className="text-primary" onClick={() => setEditing('assumptions')}>edit estimates & fixed costs</button></>}
         </p>
@@ -449,10 +449,10 @@ function ModelEditor({ mode, model, onClose, onSave }: { mode: 'prices' | 'assum
           </div>
           <div className="space-y-2">
             {draft.prices.map((p, i) => (
-              <div key={p.id} className="grid items-end gap-2 rounded-lg border border-line p-2 sm:grid-cols-[1fr_6rem_6rem_auto]">
+              <div key={p.id} className="grid items-end gap-2 rounded-lg border border-border p-2 sm:grid-cols-[1fr_6rem_6rem_auto]">
                 <div className="text-sm">
                   {p.label}
-                  <div className="text-xs text-ink-3">{p.provider} · {p.model} · {p.unit} · {p.currency}</div>
+                  <div className="text-xs text-muted-foreground">{p.provider} · {p.model} · {p.unit} · {p.currency}</div>
                 </div>
                 <Field label="Price">{(id) => <Input id={id} type="number" step="any" value={p.price} onChange={(e) => update((m) => (m.prices[i].price = Number(e.target.value)))} />}</Field>
                 <Field label="Per">{(id) => <Input id={id} type="number" value={p.per} onChange={(e) => update((m) => (m.prices[i].per = Number(e.target.value)))} />}</Field>
@@ -476,7 +476,7 @@ function ModelEditor({ mode, model, onClose, onSave }: { mode: 'prices' | 'assum
           </Field>
           {(Object.keys(draft.assumptions) as Engine[]).map((engine) => (
             <div key={engine}>
-              <div className="mb-1 mt-2 text-xs font-semibold uppercase tracking-wide text-ink-3">{draft.assumptions[engine].label}: usage per class minute</div>
+              <div className="mb-1 mt-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{draft.assumptions[engine].label}: usage per class minute</div>
               <div className="grid gap-2 sm:grid-cols-2">
                 {draft.assumptions[engine].usage.map((u, i) => {
                   const line = draft.prices.find((p) => p.id === u.priceId)
@@ -489,7 +489,7 @@ function ModelEditor({ mode, model, onClose, onSave }: { mode: 'prices' | 'assum
               </div>
             </div>
           ))}
-          <div className="mb-1 mt-2 text-xs font-semibold uppercase tracking-wide text-ink-3">Fixed monthly (₹)</div>
+          <div className="mb-1 mt-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Fixed monthly (₹)</div>
           <div className="grid gap-2 sm:grid-cols-2">
             {draft.fixedMonthly.map((f, i) => (
               <Field key={i} label={f.label}>

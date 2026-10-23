@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Check, X } from 'lucide-react'
+import { toast } from 'sonner'
 import { api } from '../../lib/api'
 import { useAuth } from '../../lib/auth'
 import { fmtAgo, fmtDateTime } from '../../lib/format'
@@ -56,6 +57,7 @@ export function ApprovalsPage() {
       danger: !approve,
       run: async (note) => {
         await api.post(`approvals/${a.id}/decide`, { decision: approve ? 'approve' : 'reject', note })
+        toast.success(approve ? 'Approved and done' : 'Request rejected')
         await queryClient.invalidateQueries({ queryKey: ['approvals'] })
         await refresh()
       },
@@ -96,19 +98,19 @@ export function ApprovalsPage() {
                     <div className="flex flex-wrap items-center gap-2">
                       <Badge tone={TONE[a.status] ?? 'neutral'}>{a.status}</Badge>
                       <Badge tone="violet">{ACTION_LABEL[a.action] ?? a.action}</Badge>
-                      <span className="text-xs text-ink-3">#{a.id} · {fmtAgo(a.createdAt)}</span>
+                      <span className="text-xs text-muted-foreground">#{a.id} · {fmtAgo(a.createdAt)}</span>
                     </div>
-                    <p className="font-medium text-ink">{a.summary}</p>
+                    <p className="font-medium text-foreground">{a.summary}</p>
                     <p className="text-sm text-ink-2">
                       {a.requestedBy?.name ?? 'Someone'} ({a.requestedBy?.email}): “{a.requestReason}”
                     </p>
                     {a.decidedBy && (
-                      <p className="text-sm text-ink-3">
+                      <p className="text-sm text-muted-foreground">
                         {a.status} by {a.decidedBy.name} {fmtDateTime(a.decidedAt)}: “{a.decisionNote}”
                       </p>
                     )}
                     {a.error && <p className="text-sm text-danger">Failed: {a.error}</p>}
-                    {a.status === 'pending' && <p className="text-xs text-ink-3">Expires {fmtDateTime(a.expiresAt)}</p>}
+                    {a.status === 'pending' && <p className="text-xs text-muted-foreground">Expires {fmtDateTime(a.expiresAt)}</p>}
                   </div>
                   {a.status === 'pending' && (
                     <div className="flex gap-2">

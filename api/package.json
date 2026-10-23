@@ -38,6 +38,7 @@
     "@swc/core": "1.11.24",
     "@types/luxon": "^3.7.1",
     "@types/node": "^22.15.18",
+    "@types/nodemailer": "^6.4.17",
     "@types/proxy-addr": "^2.0.3",
     "eslint": "^9.26.0",
     "hot-hook": "0.4.0",
@@ -53,6 +54,7 @@
     "livekit-server-sdk": "2.15.4",
     "luxon": "3.7.2",
     "mysql2": "3.22.4",
+    "nodemailer": "^6.9.16",
     "proxy-addr": "2.0.7",
     "reflect-metadata": "^0.2.2"
   },

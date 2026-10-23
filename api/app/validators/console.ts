@@ -22,7 +22,14 @@ export const codeValidator = vine.compile(
 export const setupValidator = vine.compile(
   vine.object({
     password: vine.string().maxLength(256),
-    code: vine.string().trim().maxLength(20),
+    code: vine.string().trim().maxLength(20).optional(),
+  })
+)
+
+export const stepUpValidator = vine.compile(
+  vine.object({
+    code: vine.string().trim().maxLength(20).optional(),
+    password: vine.string().maxLength(256).optional(),
   })
 )
 
@@ -41,8 +48,11 @@ export const inviteValidator = vine.compile(
     name: vine.string().trim().minLength(2).maxLength(120),
     roles: vine.array(vine.number().withoutDecimals()).minLength(1).maxLength(20),
     reason: reason(),
+    send_email: vine.boolean().optional(),
   })
 )
+
+export const reissueValidator = vine.compile(vine.object({ send_email: vine.boolean().optional() }))
 
 export const renameValidator = vine.compile(
   vine.object({ name: vine.string().trim().minLength(2).maxLength(120) })

@@ -111,14 +111,14 @@ export function UsersTab({ days }: { days: number }) {
               <tr>
                 <th />
                 {Array.from({ length: 24 }, (_, h) => (
-                  <th key={h} className="w-7 font-normal text-ink-3">{h % 3 === 0 ? h : ''}</th>
+                  <th key={h} className="w-7 font-normal text-muted-foreground">{h % 3 === 0 ? h : ''}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {WEEKDAYS.map((w, wi) => (
                 <tr key={w}>
-                  <th className="pr-2 text-left font-normal text-ink-3">{w}</th>
+                  <th className="pr-2 text-left font-normal text-muted-foreground">{w}</th>
                   {Array.from({ length: 24 }, (_, h) => {
                     const v = cell(wi, h)
                     return (
@@ -135,14 +135,14 @@ export function UsersTab({ days }: { days: number }) {
             </tbody>
           </table>
         </div>
-        <p className="mt-2 text-xs text-ink-3">Darker = more sessions. Schedule live classes, campaigns and maintenance around this.</p>
+        <p className="mt-2 text-xs text-muted-foreground">Darker = more sessions. Schedule live classes, campaigns and maintenance around this.</p>
       </Card>
 
       <Card title="Retention by sign-up week" padded={false}>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-line text-xs text-ink-3">
+              <tr className="border-b border-border text-xs text-muted-foreground">
                 <th className="px-4 py-2 text-left font-medium">Signed up (week of)</th>
                 <th className="px-2 py-2 text-right font-medium">Learners</th>
                 {Array.from({ length: 8 }, (_, k) => (
@@ -152,7 +152,7 @@ export function UsersTab({ days }: { days: number }) {
             </thead>
             <tbody>
               {d.retention.map((r) => (
-                <tr key={r.week} className="border-b border-line">
+                <tr key={r.week} className="border-b border-border">
                   <td className="whitespace-nowrap px-4 py-1.5">{fmtDay(r.week)}</td>
                   <td className="tabular px-2 text-right">{fmtInt(r.users)}</td>
                   {r.weeks.map((v, k) => (
@@ -169,7 +169,7 @@ export function UsersTab({ days }: { days: number }) {
             </tbody>
           </table>
         </div>
-        <p className="px-4 py-3 text-xs text-ink-3">Share of each sign-up week who opened the app again N weeks later. Week 0 is the sign-up week.</p>
+        <p className="px-4 py-3 text-xs text-muted-foreground">Share of each sign-up week who opened the app again N weeks later. Week 0 is the sign-up week.</p>
       </Card>
 
       <div className="grid gap-6 lg:grid-cols-2">
@@ -178,7 +178,7 @@ export function UsersTab({ days }: { days: number }) {
         </Card>
         <Card title="App versions in use">
           <RankList rows={d.appVersions.map((x) => ({ label: x.version, value: x.users }))} unit="learners" />
-          <p className="mt-3 text-xs text-ink-3">Old versions still in use decide how long an API change must stay backwards compatible.</p>
+          <p className="mt-3 text-xs text-muted-foreground">Old versions still in use decide how long an API change must stay backwards compatible.</p>
         </Card>
       </div>
       {d.concurrency.truncated && <p className="text-xs text-warning">Concurrency was computed on the first 300,000 sessions of the period.</p>}

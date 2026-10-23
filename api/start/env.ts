@@ -49,6 +49,21 @@ const env = await Env.create(new URL('../', import.meta.url), {
   | Tutor API base URL, for the health page (GET /health/ready).
   */
   TUTOR_API_URL: Env.schema.string.optional(),
+
+  /*
+  |----------------------------------------------------------
+  | Email (sign-in codes, invites). Gmail: smtp.gmail.com, 465, secure, the Gmail address
+  | as user and a 16-character App Password (Google account → Security → App passwords).
+  | Without it, development writes emails to api/tmp/mail; production falls back to
+  | authenticator-app codes.
+  |----------------------------------------------------------
+  */
+  SMTP_HOST: Env.schema.string.optional(),
+  SMTP_PORT: Env.schema.number.optional(),
+  SMTP_SECURE: Env.schema.boolean.optional(),
+  SMTP_USER: Env.schema.string.optional(),
+  SMTP_PASSWORD: Env.schema.string.optional(),
+  MAIL_FROM: Env.schema.string.optional(),
 })
 
 if (env.get('NODE_ENV') === 'production') {

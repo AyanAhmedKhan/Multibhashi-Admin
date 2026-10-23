@@ -9,6 +9,8 @@ import sessionService from '#services/session_service'
 import approvalService from '#services/approval_service'
 import { SUPER_ADMIN } from '#rbac/roles'
 import { randomToken, sha256 } from '#helpers/tokens'
+import mailService, { simpleHtml } from '#services/mail_service'
+import logger from '@adonisjs/core/services/logger'
 import type { Actor } from '#services/actor'
 import type { TransactionClientContract } from '@adonisjs/lucid/types/database'
 
@@ -16,6 +18,27 @@ const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/
 
 function setupLink(token: string) {
   return `${consoleConfig.origins[0]}/setup/${token}`
+}
+
+/** Emails the one-time link. A failed send never undoes the invite: the link is shown to share by hand. */
+async function emailInvite(user: { name: string; email: string }, link: string, invitedBy: string) {
+  const first = user.name.split(/\s+/)[0]
+  try {
+    await mailService.send({
+      to: user.email,
+      subject: 'Your invite to the MultiBhashi Admin Console',
+      text: `Hi ${first},\n\n${invitedBy} invited you to the MultiBhashi Admin Console. Open this link to choose your password (it works once and expires in ${consoleConfig.setupLinkHours} hours):\n\n${link}\n`,
+      html: simpleHtml({
+        heading: 'You’re invited to the MultiBhashi Console',
+        lines: [`Hi ${first}, ${invitedBy} invited you. Choose your password to get started. The link works once and expires in ${consoleConfig.setupLinkHours} hours.`],
+        link: { href: link, label: 'Set up my account' },
+      }),
+    })
+    return { emailed: true, emailError: null }
+  } catch (error) {
+    logger.warn({ err: (error as Error).message }, 'invite email failed')
+    return { emailed: false, emailError: (error as Error).message }
+  }
 }
 
 class StaffService {
@@ -81,20 +104,21 @@ class StaffService {
     }
   }
 
-  async invite(actor: Actor, input: { email: string; name: string; roleIds: number[]; reason: string }) {
+  async invite(actor: Actor, input: { email: string; name: string; roleIds: number[]; reason: string; sendEmail?: boolean }) {
     const email = String(input.email ?? '').trim().toLowerCase()
     const name = String(input.name ?? '').trim()
     if (!EMAIL.test(email) || email.length > 254) throw new ApiException(422, 'Enter a valid work email')
     if (name.length < 2 || name.length > 120) throw new ApiException(422, 'Enter the person’s name')
     const roles = await rbacService.rolesByIds(input.roleIds)
     if (!roles.length) throw new ApiException(422, 'Give the new staff member at least one role')
-    if (roles.some((r) => r.slug === SUPER_ADMIN)) {
-      throw new ApiException(
-        422,
-        'Invite with another role first, then request Super Admin on their page (a second super admin approves it).'
-      )
-    }
+    // Only someone holding every permission of the roles can hand them out, so only a
+    // Super Admin can invite a Super Admin.
     rbacService.assertCanGrant(actor.permissions, await rbacService.grantsOf(roles.map((r) => r.id)))
+    // Four eyes once there is a second pair: with another active Super Admin, the new one
+    // starts without the role and an approval request adds it; as the only one, it's direct.
+    const wantsSuperAdmin = roles.some((r) => r.slug === SUPER_ADMIN)
+    const needsApproval = wantsSuperAdmin && (await db.transaction((trx) => rbacService.otherActiveSuperAdmins(actor.user.id, trx))) > 0
+    const assigned = needsApproval ? roles.filter((r) => r.slug !== SUPER_ADMIN) : roles
 
     const token = randomToken()
     const user = await db.transaction(async (trx) => {
@@ -115,7 +139,7 @@ class StaffService {
       )
       await rbacService.setUserRoles(
         created.id,
-        roles.map((r) => r.id),
+        assigned.map((r) => r.id),
         actor.user.id,
         trx
       )
@@ -126,13 +150,50 @@ class StaffService {
           targetType: 'staff',
           targetId: created.id,
           reason: input.reason,
-          metadata: { email, name, roles: roles.map((r) => r.slug) },
+          metadata: { email, name, roles: assigned.map((r) => r.slug), ...(needsApproval ? { super_admin: 'pending_approval' } : {}) },
         },
         trx
       )
       return created
     })
-    return { user: this.view(user), setupLink: setupLink(token) }
+    let approvalId: number | null = null
+    if (needsApproval) {
+      const request = await approvalService.request(actor, {
+        action: 'console.roles.assign',
+        payload: { user_id: user.id, role_ids: roles.map((r) => r.id) },
+        summary: `Make ${user.name} (${user.email}) a Super Admin (new invite)`,
+        reason: input.reason,
+      })
+      approvalId = request.id
+    }
+    const delivery = input.sendEmail ? await emailInvite(user, setupLink(token), actor.user.name) : { emailed: false, emailError: null }
+    return {
+      ...delivery,
+      user: this.view(user),
+      setupLink: setupLink(token),
+      expiresAt: user.setupExpiresAt,
+      superAdmin: wantsSuperAdmin ? (needsApproval ? 'pending_approval' : 'granted') : null,
+      approvalId,
+    }
+  }
+
+  /**
+   * A fresh one-time setup link for someone who hasn't accepted their invite yet (lost or
+   * expired link). The previous link stops working.
+   */
+  async reissueInvite(actor: Actor, id: number, sendEmail = false) {
+    const user = await this.target(id)
+    if (user.status !== 'invited') throw new ApiException(409, 'This person has already set up their account. Use “Reset access” instead.')
+    await this.assertOutranks(actor, user.id)
+    const token = randomToken()
+    await db.transaction(async (trx) => {
+      user.useTransaction(trx)
+      user.merge({ setupTokenHash: sha256(token), setupExpiresAt: DateTime.now().plus({ hours: consoleConfig.setupLinkHours }), mfaPendingSecret: null })
+      await user.save()
+      await auditService.record({ actor, action: 'staff.invite_reissued', targetType: 'staff', targetId: id }, trx)
+    })
+    const delivery = sendEmail ? await emailInvite(user, setupLink(token), actor.user.name) : { emailed: false, emailError: null }
+    return { ...delivery, user: this.view(user), setupLink: setupLink(token), expiresAt: user.setupExpiresAt }
   }
 
   async rename(actor: Actor, id: number, name: string) {

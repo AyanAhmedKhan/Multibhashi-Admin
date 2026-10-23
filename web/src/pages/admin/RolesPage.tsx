@@ -1,6 +1,7 @@
 import { Fragment, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Check, Minus, Plus } from 'lucide-react'
+import { toast } from 'sonner'
 import { api } from '../../lib/api'
 import { useAuth } from '../../lib/auth'
 import { useReason } from '../../components/dialogs'
@@ -46,6 +47,7 @@ export function RolesPage() {
         if (editing!.id) await api.put(`roles/${editing!.id}`, body)
         else await api.post('roles', body)
         setEditing(null)
+        toast.success('Role saved')
         await queryClient.invalidateQueries({ queryKey: ['roles'] })
       },
     })
@@ -70,18 +72,18 @@ export function RolesPage() {
             <Card key={r.id}>
               <div className="flex items-start justify-between gap-2">
                 <div>
-                  <div className="font-semibold text-ink">{r.name}</div>
-                  <div className="text-xs text-ink-3">{r.slug}</div>
+                  <div className="font-semibold text-foreground">{r.name}</div>
+                  <div className="text-xs text-muted-foreground">{r.slug}</div>
                 </div>
                 {r.isSystem ? <Badge>built-in</Badge> : <Badge tone="blue">custom</Badge>}
               </div>
               <p className="mt-2 text-sm text-ink-2">{r.description}</p>
-              <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-ink-3">
+              <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
                 <span>{r.permissions.length} permissions</span>
                 <span>{r.members} people</span>
                 {r.seats && <span>suggested: {r.seats}</span>}
               </div>
-              {!!r.legacy?.length && <p className="mt-1 text-xs text-ink-3">Replaces old roles: {r.legacy.join(', ')}</p>}
+              {!!r.legacy?.length && <p className="mt-1 text-xs text-muted-foreground">Replaces old roles: {r.legacy.join(', ')}</p>}
               {!r.isSystem && manage && (
                 <Button
                   size="sm"
@@ -99,8 +101,8 @@ export function RolesPage() {
           <div className="overflow-x-auto">
             <table className="w-full border-collapse text-xs">
               <thead>
-                <tr className="border-b border-line">
-                  <th className="sticky left-0 z-10 min-w-64 bg-surface px-3 py-2 text-left font-medium text-ink-3">Permission</th>
+                <tr className="border-b border-border">
+                  <th className="sticky left-0 z-10 min-w-64 bg-card px-3 py-2 text-left font-medium text-muted-foreground">Permission</th>
                   {roles.map((r) => (
                     <th key={r.id} className="whitespace-nowrap px-2 py-2 font-medium text-ink-2" style={{ writingMode: 'vertical-rl' }}>
                       {r.name}
@@ -111,25 +113,25 @@ export function RolesPage() {
               <tbody>
                 {modules.map((m) => (
                   <Fragment key={m.key}>
-                    <tr className="bg-surface-2">
-                      <td colSpan={roles.length + 1} className="sticky left-0 px-3 py-1.5 font-semibold text-ink">
+                    <tr className="bg-muted">
+                      <td colSpan={roles.length + 1} className="sticky left-0 px-3 py-1.5 font-semibold text-foreground">
                         {m.label} {m.phase > 1 && <Badge>phase {m.phase}</Badge>}
                       </td>
                     </tr>
                     {m.permissions.map((p) => (
-                      <tr key={p.key} className="border-b border-line">
-                        <td className={`sticky left-0 bg-surface px-3 py-1.5 ${p.available ? 'text-ink' : 'text-ink-3'}`}>
+                      <tr key={p.key} className="border-b border-border">
+                        <td className={`sticky left-0 bg-card px-3 py-1.5 ${p.available ? 'text-foreground' : 'text-muted-foreground'}`}>
                           <div className="flex items-center gap-1.5">
                             {p.label} <Badge tone={RISK[p.risk]}>{p.risk}</Badge>
                           </div>
-                          <code className="text-[10px] text-ink-3">{p.key}</code>
+                          <code className="text-[10px] text-muted-foreground">{p.key}</code>
                         </td>
                         {roles.map((r) => (
                           <td key={r.id} className="px-2 text-center">
                             {r.permissions.includes(p.key) ? (
                               <Check className="mx-auto size-4 text-success" aria-label="granted" />
                             ) : (
-                              <Minus className="mx-auto size-3 text-line" aria-label="not granted" />
+                              <Minus className="mx-auto size-3 text-border" aria-label="not granted" />
                             )}
                           </td>
                         ))}
@@ -140,8 +142,8 @@ export function RolesPage() {
               </tbody>
             </table>
           </div>
-          <p className="px-4 py-3 text-xs text-ink-3">
-            Risk: <b>sensitive</b> reads are audited with a reason; <b>critical</b> actions also need a fresh authenticator code, and some need a second approver.
+          <p className="px-4 py-3 text-xs text-muted-foreground">
+            Risk: <b>sensitive</b> reads are audited with a reason; <b>critical</b> actions also need a fresh code (or password), and some need a second approver.
           </p>
         </Card>
       )}
@@ -171,7 +173,7 @@ export function RolesPage() {
           <div className="space-y-3">
             {modules.map((m) => (
               <div key={m.key}>
-                <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-ink-3">{m.label}</div>
+                <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{m.label}</div>
                 <div className="grid gap-1 sm:grid-cols-2">
                   {m.permissions.map((p) => {
                     const mine = can(p.key)

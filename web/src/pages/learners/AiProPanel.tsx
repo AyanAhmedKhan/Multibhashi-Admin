@@ -132,7 +132,7 @@ export function AiProPanel({ learnerId }: { learnerId: number }) {
               {state.data.plans.map((p) => (
                 <tr key={p.id}>
                   <Td>
-                    {p.course ?? '—'} <span className="text-ink-3">· {p.level ?? '—'}</span>
+                    {p.course ?? '—'} <span className="text-muted-foreground">· {p.level ?? '—'}</span>
                   </Td>
                   <Td>{p.package ?? '—'}</Td>
                   <Td>
@@ -147,8 +147,8 @@ export function AiProPanel({ learnerId }: { learnerId: number }) {
           )}
           {!!state.data?.grants.length && (
             <div>
-              <div className="mb-2 text-xs font-medium uppercase tracking-wide text-ink-3">Given in the console</div>
-              <ul className="divide-y divide-line rounded-lg border border-line">
+              <div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">Given in the console</div>
+              <ul className="divide-y divide-border rounded-lg border border-border">
                 {state.data.grants.map((g) => (
                   <li key={g.id} className="flex flex-wrap items-center justify-between gap-3 p-3 text-sm">
                     <div className="min-w-0">
@@ -156,10 +156,10 @@ export function AiProPanel({ learnerId }: { learnerId: number }) {
                         {g.level} · lessons {g.lessons}{' '}
                         <Badge tone={g.status === 'active' ? 'green' : 'neutral'}>{g.status}</Badge>
                       </div>
-                      <div className="text-xs text-ink-3">
+                      <div className="text-xs text-muted-foreground">
                         {g.minutesTotal} min on {g.cardsGranted} cards · {g.subscriptionsCreated} lessons unlocked · until {fmtDateTime(new Date(g.expiresAt))} · by {g.grantedBy ?? '—'}
                       </div>
-                      <div className="text-xs text-ink-3">“{g.reason}”{g.endReason ? ` · ended: “${g.endReason}”` : ''}</div>
+                      <div className="text-xs text-muted-foreground">“{g.reason}”{g.endReason ? ` · ended: “${g.endReason}”` : ''}</div>
                     </div>
                     {g.status === 'active' && can('tutor.access.revoke') && (
                       <div className="flex gap-2">
@@ -311,7 +311,7 @@ function GiveAiPro({ learnerId, onClose, onDone }: { learnerId: number; onClose:
           </div>
           <ErrorNote error={error} />
           {preview && (
-            <div className="rounded-lg border border-line bg-surface-2 p-3 text-sm">
+            <div className="rounded-lg border border-border bg-muted p-3 text-sm">
               <div className="font-medium">What will be written</div>
               <ul className="mt-1 list-inside list-disc space-y-0.5 text-ink-2">
                 <li>{preview.lessons} lessons matched; {preview.cardCount} cards get {minutes} min each = <b>{fmtInt(preview.minutesTotal)} min</b></li>

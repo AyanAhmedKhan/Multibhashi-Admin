@@ -88,9 +88,9 @@ reviewable change; none was made here (the monolith is live and this work stays 
 |---|---|---|
 | Where it lives | A separate service and repo, not inside the monolith or the tutor API | Admin has a different risk profile: its own deploy, secrets, rate limits and network rules. A bug in the console can't take down learner-facing APIs, and vice versa. |
 | Backend | AdonisJS 6 (TypeScript), same versions as the tutor API | The team already runs it; Lucid works on the shared MySQL; migrations tracked in `console_api_schema` so they never touch `adonis_schema` (monolith) or `tutor_api_schema` (tutor). |
-| Frontend | React 18 + Vite + TypeScript + Tailwind v4, TanStack Query, Recharts | Fast to build lists/forms/charts; one static bundle; same stack family as the RN web app. |
+| Frontend | React 19 + Vite + TypeScript + Tailwind v4, shadcn/ui (Radix), TanStack Query, Recharts | Fast to build lists/forms/charts; accessible dialogs, menus and code inputs we don't maintain ourselves; one static bundle; same stack family as the RN web app. |
 | Same origin | nginx serves the SPA and proxies `/api` | First-party cookies with `SameSite=Strict`; no CORS surface at all. |
-| Auth | Own server-side sessions + TOTP, not JWT | Instant revocation (leaver, lost laptop), session list per person, idle timeout. JWTs can't be revoked. |
+| Auth | Own server-side sessions + a second sign-in step (email code by default, authenticator app optional), not JWT | Instant revocation (leaver, lost laptop), session list per person, idle timeout. JWTs can't be revoked. |
 | Data access | The console reads the shared DB directly; it **writes only through code that mirrors the owning system's rules** (e.g. the minutes ledger, the memory tombstone) | Avoids a distributed system on day one; each write path is documented next to the code it mirrors. When the monolith module is retired, the console becomes the owner. |
 | Heavy reads | A second DB connection (`DB_ANALYTICS_*`) for Insights → a read replica | Dashboards never compete with learners' writes. |
 | Migration from the old admin | Strangler pattern: one module at a time; the old page is switched off when the console's is live | No big-bang; each phase ships on its own. |
@@ -117,7 +117,7 @@ Phase 1 is built; later phases are listed in the sidebar as "Coming next".
 | 1 | **Overview** | KPI tiles, classes per day, top lessons, pending approvals | home | **1 ✓** |
 | 2 | **Insights** | Users & growth · Screens & content · AI tutor usage · Cost & margin | analytics (leads only) | **1 ✓** |
 | 3 | **AI Tutor** | Live classes (end a class) · Classes (detail, transcript, minutes ±) · Minutes ledger · Free-grant abuse view | CLI `ai:grant-minutes` | **1 ✓** |
-| 4 | **Learners** | Search (masked) · Profile · Reveal contact · AI Pro (give/extend/end) · Tutor memory (view/erase) · Data export | users, userprofile | **1 ✓** (edit/block in 2) |
+| 4 | **Learners** | Search · Full profile (account, languages, devices, screens, bookings and plans) · AI Pro (give/extend/end) · Tutor memory (view/erase) · Data export | users, userprofile | **1 ✓** (edit/block in 2) |
 | 5 | **Administration** | Approvals · Staff · Roles & permissions · Audit log · Security policy · System health · My account | team, dashboard_controls | **1 ✓** |
 | 6 | CRM & Leads | Leads (own/team/all), assign/transfer, remarks, renewals, recordings, sources/statuses | leads, status, contactus | 2 |
 | 7 | Bookings & Sales | Course/session/package/IELTS bookings, subscriptions, coupons, offers, invoices | bookings, coupon, offers, subscription, sessions_testing | 2 |
@@ -214,15 +214,24 @@ re-read on every request, so a role change applies at once.
 
 **Identity and sign-in**
 
-- Invite-only accounts; one-time setup link (48 h, hashed in DB) where the person sets
-  their own password **and** enrols TOTP MFA. No admin ever knows anyone's password.
-- MFA (TOTP, RFC 6238) mandatory for everyone, with replay protection and 10 single-use
-  recovery codes (hashed).
+- Invite-only accounts; one-time setup link (48 h, hashed in DB) where the person chooses
+  their own password. No admin ever knows anyone's password. The link can be emailed by the
+  console or shared by the inviter (copy, WhatsApp, email, QR code). A Super Admin can invite
+  another Super Admin; while one other Super Admin exists, that role waits for their approval.
+- Second sign-in step, chosen in **Security policy** (applies to everyone):
+  - **Email code** (default): a 6-digit code sent over SMTP (Gmail App Password works),
+    valid 10 minutes, single use, 5 tries, at most 5 codes per sign-in with a 30 s gap;
+    stored only as an HMAC. Without SMTP in production the console falls back to the
+    authenticator app rather than signing anyone in on a password alone.
+  - **Authenticator app** (TOTP, RFC 6238): strongest; replay protection and 10 single-use
+    recovery codes (hashed).
+  - **Password only**: allowed but not recommended; critical actions still re-ask for the
+    password.
 - Passwords per NIST 800-63B: 12+ characters, common and personal ones refused, no forced
   rotation; hashed with scrypt.
 - Lockout after 5 failures (15 min), per-IP rate limit, and the same error whether or not the
   email exists, with equal timing (no account enumeration).
-- Optional IP allowlist (office/VPN) on top of MFA.
+- Optional IP allowlist (office/VPN) on top of the second step.
 
 **Sessions**
 
@@ -247,8 +256,10 @@ re-read on every request, so a role change applies at once.
 
 **Personal data (DPDP Act 2023)**
 
-- Phone, email and name are masked by default; revealing them is a separate audited
-  action that needs `learners.pii.read`.
+- Roles with `learners.pii.read` (Super Admin, Platform Admin, Sales Manager, Privacy
+  Officer) see learners' names, phones, emails and full profile; everyone else sees them
+  masked. Every profile view is audited. Password, token and device-key columns are never
+  shown to anyone.
 - Insights are aggregates only.
 - Erasure ("forget this learner's tutor memory") and access requests (JSON export) are
   built in, for the Privacy Officer.
@@ -364,10 +375,10 @@ or resume.
 | Area | Built |
 |---|---|
 | API | 63 endpoints (`api/start/routes.ts`), each with a permission check; AdonisJS 6, Lucid, VineJS validation |
-| Data | 10 new tables (`console_users`, `console_roles`, `console_role_permissions`, `console_user_roles`, `console_sessions`, `console_audit_logs` + `console_audit_head`, `console_approval_requests`, `console_settings`, `console_ai_pro_grants`); additive migrations only, tracked in `console_api_schema` |
-| Web | 21 screens: sign-in + MFA, invite setup with QR and recovery codes, Overview, 4 Insights tabs, Live classes, Classes, Class detail, Minutes ledger, Learners, Learner (AI Pro, memory, export), Approvals, Staff, Staff member, Roles + matrix, Audit log, Security policy, System health, My account. Light and dark, phone to desktop |
+| Data | 12 new tables (`console_users`, `console_roles`, `console_role_permissions`, `console_user_roles`, `console_sessions`, `console_audit_logs` + `console_audit_head`, `console_approval_requests`, `console_settings`, `console_ai_pro_grants`, `console_cost_invoices`, `console_email_codes`); additive migrations only, tracked in `console_api_schema` |
+| Web | 21 screens on shadcn/ui: sign-in + email code (or authenticator), invite setup and sharing (link, WhatsApp, email, QR), ⌘K search, Overview, 4 Insights tabs, Live classes, Classes, Class detail, Minutes ledger, Learners, Learner (AI Pro, memory, export), Approvals, Staff, Staff member, Roles + matrix, Audit log, Security policy, System health, My account. Light and dark, phone to desktop |
 | Commands | `console:bootstrap` (first Super Admin), `console:sync-roles`, and local-only `console:dev-schema`, `console:seed-demo [--remove]` |
-| Tests | 20 unit (TOTP RFC 6238 vectors, masking, password policy, role invariants such as separation of duties) + 3 end-to-end HTTP flows (invite → MFA → grants → approvals → AI Pro → erase → disable → audit tamper detection; lockout without enumeration) + a browser tour of every page at desktop, phone width and dark mode |
+| Tests | 26 unit (TOTP RFC 6238 vectors, masking, password policy, cost model, role invariants such as separation of duties) + 5 end-to-end HTTP flows (invite → MFA → grants → approvals → AI Pro → erase → disable → audit tamper detection; Super Admin invite and reissue; email-code and password-only sign-in; lockout without enumeration) + a browser tour of every page at desktop, phone width and dark mode |
 
 How to run it locally: see [`../README.md`](../README.md).
 
@@ -381,7 +392,7 @@ Each phase ships on its own and switches the matching old pages off.
 |---|---|---|
 | 0 | Monolith security fixes (§1) | days |
 | 1 ✓ | Core (auth, MFA, RBAC, approvals, audit, security policy), AI Tutor, Learners, Insights, cost model, AI Pro | done (local) |
-| 1.5 | Deploy behind nginx on `admin.multibhashi.com`, dedicated DB users + replica, email delivery for invites (SES), migrate staff accounts (§12); exact AI usage goes live with the agent + tutor API change (§8) | ~1–2 weeks |
+| 1.5 | Deploy behind nginx on `admin.multibhashi.com`, dedicated DB users + replica, SMTP for sign-in codes and invites (Gmail App Password to start), migrate staff accounts (§12); exact AI usage goes live with the agent + tutor API change (§8) | ~1–2 weeks |
 | 2 | CRM & Leads, Bookings & Sales, Finance (refunds/payouts with approval), Teachers, Live Classes, Reports, Learners edit/block; data scopes; Insights revenue and funnel by source | ~6–8 weeks |
 | 3 | Content & Curriculum (incl. AI tutor prompts/voices as versioned, approvable config the agent reads), B2B & Institutes, Marketing & Site, Trainer Portal | ~6 weeks |
 | 4 | Retire the monolith admin; SSO (Google Workspace) for staff; anomaly alerts (free-class farming, refund spikes) | ~2 weeks |
@@ -395,7 +406,7 @@ Each phase ships on its own and switches the matching old pages off.
 - **Offboarding**: disable the account the same day (all sessions end instantly). Never
   delete it: the audit log refers to it.
 - **Lost phone / forgotten password**: another admin uses "Reset access" (new one-time link);
-  the person re-enrols MFA.
+  the person chooses a new password (and re-adds the authenticator if the policy uses one).
 - **Access review, quarterly**: each manager confirms their team's roles; remove what isn't
   used; Auditor accounts are time-boxed.
 - **Approvals**: target a decision within one working day; requests expire after 48 h.

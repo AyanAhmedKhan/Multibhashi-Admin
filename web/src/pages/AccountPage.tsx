@@ -55,7 +55,7 @@ export function AccountPage() {
               ['Roles', <div className="flex flex-wrap gap-1">{me.roles.map((r) => <Badge key={r.id} tone="blue">{r.name}</Badge>)}</div>],
               ['Permissions', `${me.permissions.length} granted`],
               ['Last sign-in', fmtDateTime(me.user.lastLoginAt)],
-              ['Two-step verification', <Badge tone="green">On</Badge>],
+              ['Second sign-in step', me.policy.mfaMethod === 'email' ? <Badge tone="green">Email code to {me.policy.codeSentTo}</Badge> : me.policy.mfaMethod === 'totp' ? <Badge tone="green">Authenticator app</Badge> : <Badge tone="red">Off (password only)</Badge>],
             ]}
           />
         </Card>
@@ -76,12 +76,13 @@ export function AccountPage() {
           </div>
         </Card>
 
+        {me.policy.mfaMethod === 'totp' && (
         <Card title="Recovery codes" className="lg:col-span-2">
           <p className="text-sm text-ink-2">
             {me.user.recoveryCodesLeft} of 10 unused. New codes replace the old ones (you will be asked for an authenticator code).
           </p>
           {codes && (
-            <ul className="tabular mt-3 grid grid-cols-2 gap-2 rounded-lg bg-surface-2 p-4 font-mono text-sm sm:grid-cols-5">
+            <ul className="tabular mt-3 grid grid-cols-2 gap-2 rounded-lg bg-muted p-4 font-mono text-sm sm:grid-cols-5">
               {codes.map((c) => (
                 <li key={c}>{c}</li>
               ))}
@@ -92,6 +93,7 @@ export function AccountPage() {
             Generate new codes
           </Button>
         </Card>
+        )}
 
         <Card
           title="Where you’re signed in"

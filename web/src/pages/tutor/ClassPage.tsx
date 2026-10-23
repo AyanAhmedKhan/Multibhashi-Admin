@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { FileText, Plus, RotateCcw } from 'lucide-react'
+import { toast } from 'sonner'
 import { api } from '../../lib/api'
 import { useAuth } from '../../lib/auth'
 import { fmtDateTime, fmtInt, fmtMinutes, fmtQuantity, inr } from '../../lib/format'
@@ -95,11 +96,9 @@ export function ClassPage() {
       danger: removing,
       run: async (reason) => {
         const res = await api.post<{ status: string; approvalId?: number; new_total?: number }>(`tutor/classes/${c.id}/grant`, { minutes: minutesNum, reason })
-        setNotice(
-          res.status === 'pending_approval'
-            ? `Approval request #${res.approvalId} created. It runs once someone else approves it.`
-            : `Done. The class total is now ${fmtMinutes(res.new_total)}.`
-        )
+        if (res.status === 'pending_approval') toast.info(`Approval request #${res.approvalId} created. It runs once someone else approves it.`)
+        else toast.success(`Done. The class total is now ${fmtMinutes(res.new_total)}.`)
+        setNotice(res.status === 'pending_approval' ? `Waiting for approval #${res.approvalId}.` : `Done. The class total is now ${fmtMinutes(res.new_total)}.`)
         await queryClient.invalidateQueries({ queryKey: ['class', id] })
       },
     })
@@ -121,7 +120,7 @@ export function ClassPage() {
           )
         }
       />
-      {notice && <div className="mb-4 rounded-lg border border-line bg-success-soft px-3 py-2 text-sm text-success">{notice}</div>}
+      {notice && <div className="mb-4 rounded-lg border border-border bg-success-soft px-3 py-2 text-sm text-success">{notice}</div>}
       <div className="grid gap-6 lg:grid-cols-3">
         <Card title="Class" className="lg:col-span-2">
           <KeyValue
@@ -159,7 +158,7 @@ export function ClassPage() {
           title={`AI cost of this class: ${inr(cost.data.totalInr, 2)}`}
           className="mt-6"
           padded={false}
-          actions={<span className="text-xs text-ink-3">{cost.data.jobs} agent run{cost.data.jobs === 1 ? '' : 's'}{c.timeSpent ? ` · ${inr(cost.data.totalInr / c.timeSpent, 2)}/min` : ''}</span>}
+          actions={<span className="text-xs text-muted-foreground">{cost.data.jobs} agent run{cost.data.jobs === 1 ? '' : 's'}{c.timeSpent ? ` · ${inr(cost.data.totalInr / c.timeSpent, 2)}/min` : ''}</span>}
         >
           {cost.data.items.length ? (
             <Table head={['Service', 'Usage', 'Cost']}>
@@ -167,7 +166,7 @@ export function ClassPage() {
                 <tr key={`${i.kind}-${i.provider}-${i.model}-${i.unit}`}>
                   <Td>
                     {i.label ?? `${i.provider} ${i.model}`}
-                    <div className="text-xs text-ink-3">{i.kind} · {i.model || 'any model'}</div>
+                    <div className="text-xs text-muted-foreground">{i.kind} · {i.model || 'any model'}</div>
                   </Td>
                   <Td className="tabular">{fmtQuantity(i.quantity, i.unit)}</Td>
                   <Td className="tabular">{i.priced ? inr(i.costInr, 3) : <Badge tone="red">no price</Badge>}</Td>
@@ -175,7 +174,7 @@ export function ClassPage() {
               ))}
             </Table>
           ) : (
-            <p className="p-5 text-sm text-ink-3">No usage was recorded for this class (it ran before recording started); Insights estimates it.</p>
+            <p className="p-5 text-sm text-muted-foreground">No usage was recorded for this class (it ran before recording started); Insights estimates it.</p>
           )}
         </Card>
       )}
@@ -195,7 +194,7 @@ export function ClassPage() {
           ))}
           {!c.ledger.length && (
             <tr>
-              <Td className="text-ink-3">No ledger rows (a class the tutor opened without a purchase record).</Td>
+              <Td className="text-muted-foreground">No ledger rows (a class the tutor opened without a purchase record).</Td>
             </tr>
           )}
         </Table>
@@ -204,28 +203,28 @@ export function ClassPage() {
       {transcript && (
         <Card title="Transcript" className="mt-6" actions={<Button size="sm" variant="ghost" onClick={() => setTranscript(null)}>Hide</Button>}>
           {transcript.summary && (
-            <div className="mb-4 rounded-lg bg-surface-2 p-3 text-sm">
-              <div className="text-xs font-medium uppercase tracking-wide text-ink-3">Tutor’s class summary</div>
+            <div className="mb-4 rounded-lg bg-muted p-3 text-sm">
+              <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Tutor’s class summary</div>
               <p className="mt-1 text-ink-2">{transcript.summary.summary}</p>
             </div>
           )}
           <ol className="space-y-2">
             {transcript.messages.map((m) => (
               <li key={m.id}>
-                <div className={m.chat_from === 'user' ? 'ml-auto max-w-[85%] rounded-xl bg-success-soft px-3 py-2' : 'max-w-[85%] rounded-xl bg-surface-2 px-3 py-2'}>
-                  <div className="text-[11px] text-ink-3">
+                <div className={m.chat_from === 'user' ? 'ml-auto max-w-[85%] rounded-xl bg-success-soft px-3 py-2' : 'max-w-[85%] rounded-xl bg-muted px-3 py-2'}>
+                  <div className="text-[11px] text-muted-foreground">
                     {m.chat_from === 'user' ? 'Learner' : 'Tutor'} · {fmtDateTime(m.created_at)}
                   </div>
-                  <p className="mt-0.5 whitespace-pre-wrap text-sm text-ink">{m.chat}</p>
+                  <p className="mt-0.5 whitespace-pre-wrap text-sm text-foreground">{m.chat}</p>
                 </div>
                 {transcript.resetAfterId === m.id && (
                   <div className="my-3 flex items-center gap-2 text-xs text-violet">
-                    <span className="h-px flex-1 bg-line" /> Learner reset the class here: the tutor only remembers what follows <span className="h-px flex-1 bg-line" />
+                    <span className="h-px flex-1 bg-border" /> Learner reset the class here: the tutor only remembers what follows <span className="h-px flex-1 bg-border" />
                   </div>
                 )}
               </li>
             ))}
-            {!transcript.messages.length && <p className="text-sm text-ink-3">No messages were saved for this class.</p>}
+            {!transcript.messages.length && <p className="text-sm text-muted-foreground">No messages were saved for this class.</p>}
           </ol>
         </Card>
       )}

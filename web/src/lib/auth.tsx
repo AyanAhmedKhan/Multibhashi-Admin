@@ -23,6 +23,10 @@ export interface Me {
     grantMax: number
     aiProMaxDays: number
     aiProMaxMinutes: number
+    /** Second sign-in step in force: email code, authenticator app, or none. */
+    mfaMethod: 'email' | 'totp' | 'off'
+    codeSentTo: string
+    mailConfigured: boolean
   }
   modules: { key: string; label: string; phase: number }[]
   pendingApprovals: number

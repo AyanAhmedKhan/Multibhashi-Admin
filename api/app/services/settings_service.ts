@@ -7,7 +7,7 @@ import type { TransactionClientContract } from '@adonisjs/lucid/types/database'
 type Key = keyof ConsoleSettings
 
 /** Bounds for each tunable: a typo can't disable lockout or make sessions last a year. */
-const BOUNDS: Record<Exclude<Key, 'ip_allowlist'>, [number, number]> = {
+const BOUNDS: Record<Exclude<Key, 'ip_allowlist' | 'mfa_method'>, [number, number]> = {
   session_idle_minutes: [5, 240],
   session_absolute_hours: [1, 24],
   step_up_minutes: [1, 60],
@@ -21,6 +21,19 @@ const BOUNDS: Record<Exclude<Key, 'ip_allowlist'>, [number, number]> = {
 
 const CACHE_MS = 15_000
 
+/**
+ * The driver already decodes JSON columns, so a JSON string setting ("email") arrives as
+ * a plain string; only a still-encoded value needs JSON.parse.
+ */
+function decode(raw: unknown) {
+  if (typeof raw !== 'string') return raw
+  try {
+    return JSON.parse(raw)
+  } catch {
+    return raw
+  }
+}
+
 class SettingsService {
   #cache: { at: number; value: ConsoleSettings } | null = null
 
@@ -30,8 +43,7 @@ class SettingsService {
     const value = { ...consoleConfig.defaults }
     for (const row of rows) {
       if (row.key in value) {
-        ;(value as Record<string, unknown>)[row.key] =
-          typeof row.value === 'string' ? JSON.parse(row.value) : row.value
+        ;(value as Record<string, unknown>)[row.key] = decode(row.value)
       }
     }
     this.#cache = { at: Date.now(), value }
@@ -44,7 +56,11 @@ class SettingsService {
     const before: Partial<ConsoleSettings> = {}
     for (const [key, raw] of Object.entries(changes) as [Key, unknown][]) {
       if (!(key in consoleConfig.defaults)) throw new ApiException(422, `Unknown setting ${key}`)
-      if (key === 'ip_allowlist') {
+      if (key === 'mfa_method') {
+        if (!['email', 'totp', 'off'].includes(raw as string)) {
+          throw new ApiException(422, 'mfa_method must be email, totp or off')
+        }
+      } else if (key === 'ip_allowlist') {
         if (!Array.isArray(raw) || raw.some((entry) => typeof entry !== 'string')) {
           throw new ApiException(422, 'ip_allowlist must be a list of IPs or CIDR ranges')
         }
@@ -71,6 +87,11 @@ class SettingsService {
     }
     this.#cache = null
     return before
+  }
+
+  /** After a direct database change (tests, migrations). */
+  clearCache() {
+    this.#cache = null
   }
 
   /** True when the allowlist is empty (off) or contains the IP. */

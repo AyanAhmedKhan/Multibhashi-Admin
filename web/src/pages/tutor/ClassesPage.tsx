@@ -59,7 +59,7 @@ export function ClassesPage() {
     <>
       <PageHeader title="Classes" subtitle="Every AI tutor class. Learner names are masked unless your role can see personal data." />
       <Card padded={false}>
-        <div className="flex flex-wrap items-end gap-3 border-b border-line p-4">
+        <div className="flex flex-wrap items-end gap-3 border-b border-border p-4">
           <form
             className="relative min-w-[14rem] flex-1"
             onSubmit={(e) => {
@@ -67,7 +67,7 @@ export function ClassesPage() {
               set({ q })
             }}
           >
-            <Search className="pointer-events-none absolute left-3 top-3 size-4 text-ink-3" aria-hidden />
+            <Search className="pointer-events-none absolute left-3 top-3 size-4 text-muted-foreground" aria-hidden />
             <Input aria-label="Search classes" className="pl-9" placeholder="Class id, lesson or room…" value={q} onChange={(e) => setQ(e.target.value)} />
           </form>
           <Select aria-label="Status" className="w-36" value={filters.status} onChange={(e) => set({ status: e.target.value })}>
@@ -89,7 +89,7 @@ export function ClassesPage() {
           <>
             <Table head={['Class', 'Lesson', 'Learner', 'Status', 'Used / total', 'Started']}>
               {classes.data.data.map((c) => (
-                <tr key={c.id} className="hover:bg-surface-2">
+                <tr key={c.id} className="hover:bg-muted">
                   <Td>
                     <Link to={`/tutor/classes/${c.id}`} className="font-medium text-primary">
                       #{c.id}
@@ -97,10 +97,10 @@ export function ClassesPage() {
                   </Td>
                   <Td className="max-w-xs">{c.lesson_topic ?? '—'}</Td>
                   <Td>
-                    <Link to={`/learners/${c.user_id}`} className="text-ink hover:text-primary">
+                    <Link to={`/learners/${c.user_id}`} className="text-foreground hover:text-primary">
                       {c.learner_name ?? `#${c.user_id}`}
                     </Link>
-                    <div className="text-xs text-ink-3">#{c.user_id}</div>
+                    <div className="text-xs text-muted-foreground">#{c.user_id}</div>
                   </Td>
                   <Td>
                     <Badge tone={statusTone(c.status)}>{c.status ?? 'unknown'}</Badge>

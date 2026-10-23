@@ -64,13 +64,13 @@ export default class TutorController {
     return minutesService.freeGrants({ page: f.page ?? 1, perPage: f.perPage ?? 25 })
   }
 
-  async learners({ request }: HttpContext) {
+  async learners({ request, actor }: HttpContext) {
     const f = await listValidator.validate(request.qs())
-    return learnersService.search(f.q ?? '', f.page ?? 1, f.perPage ?? 25)
+    return learnersService.search(f.q ?? '', f.page ?? 1, f.perPage ?? 25, actor.permissions.has('learners.pii.read'))
   }
 
-  async learner({ params }: HttpContext) {
-    return learnersService.get(Number(params.id))
+  async learner({ params, actor }: HttpContext) {
+    return learnersService.get(Number(params.id), actor)
   }
 
   async revealLearner({ request, actor, params }: HttpContext) {

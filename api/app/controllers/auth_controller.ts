@@ -13,7 +13,9 @@ import {
   codeValidator,
   loginValidator,
   setupValidator,
+  stepUpValidator,
 } from '#validators/console'
+import mailService from '#services/mail_service'
 import type ConsoleSession from '#models/console_session'
 
 function setSessionCookie({ response }: HttpContext, token: string, session: ConsoleSession) {
@@ -33,10 +35,14 @@ function meta({ request }: HttpContext) {
 export default class AuthController {
   async login(ctx: HttpContext) {
     const { email, password } = await ctx.request.validateUsing(loginValidator)
-    const { token, session } = await authService.login(email, password, meta(ctx))
+    const { token, session, method, sentTo } = await authService.login(email, password, meta(ctx))
     setSessionCookie(ctx, token, session)
-    // The MFA step is a state-changing request too, so it carries this session's token.
-    return { next: 'mfa', csrfToken: session.csrfToken }
+    // The code step is a state-changing request too, so it carries this session's token.
+    return { next: method === 'off' ? 'app' : 'mfa', method, sentTo, csrfToken: session.csrfToken }
+  }
+
+  async resendCode({ actor }: HttpContext) {
+    return authService.resendLoginCode(actor.session)
   }
 
   async mfa(ctx: HttpContext) {
@@ -71,6 +77,9 @@ export default class AuthController {
         idleMinutes: settings.session_idle_minutes,
         grantDirectLimit: settings.grant_minutes_direct_limit,
         grantMax: settings.grant_minutes_max,
+        mfaMethod: await authService.method(),
+        codeSentTo: authService.sentToFor(actor.user),
+        mailConfigured: mailService.configured,
         aiProMaxDays: settings.ai_pro_direct_max_days,
         aiProMaxMinutes: settings.ai_pro_direct_max_minutes,
       },
@@ -79,9 +88,13 @@ export default class AuthController {
     }
   }
 
+  async sendStepUpCode({ actor }: HttpContext) {
+    return authService.sendStepUpCode(actor)
+  }
+
   async stepUp(ctx: HttpContext) {
-    const { code } = await ctx.request.validateUsing(codeValidator)
-    await authService.stepUp(ctx.actor, code)
+    const input = await ctx.request.validateUsing(stepUpValidator)
+    await authService.stepUp(ctx.actor, input)
     return { ok: true, mfaAt: ctx.actor.session.mfaAt }
   }
 

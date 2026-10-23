@@ -1,13 +1,15 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { KeyRound, LogOut, ShieldOff, ShieldCheck } from 'lucide-react'
+import { KeyRound, LogOut, Send, ShieldOff, ShieldCheck } from 'lucide-react'
+import { toast } from 'sonner'
+import { ShareInvite } from '../../components/share-invite'
 import { api } from '../../lib/api'
 import { useAuth } from '../../lib/auth'
 import { fmtAgo, fmtDateTime } from '../../lib/format'
 import { useReason } from '../../components/dialogs'
-import { Badge, Button, Card, ErrorNote, KeyValue, PageHeader, Spinner, Table, Td } from '../../components/ui'
-import { RolePicker, STATUS_TONE, type RoleOption } from './StaffPage'
+import { Badge, Button, Card, ErrorNote, KeyValue, Modal, PageHeader, Spinner, Table, Td } from '../../components/ui'
+import { RolePicker, SignInStep, STATUS_TONE, type Invite, type RoleOption } from './StaffPage'
 
 interface StaffDetail {
   id: number
@@ -35,7 +37,7 @@ export function StaffMemberPage() {
   const detail = useQuery({ queryKey: ['staff', id], queryFn: () => api.get<StaffDetail>(`staff/${id}`) })
   const roles = useQuery({ queryKey: ['roles'], queryFn: () => api.get<{ roles: RoleOption[] }>('roles'), enabled: can('console.roles.read') })
   const [picked, setPicked] = useState<number[]>([])
-  const [notice, setNotice] = useState<string | null>(null)
+  const [invite, setInvite] = useState<Invite | null>(null)
 
   useEffect(() => {
     if (detail.data) setPicked(detail.data.roles.map((r) => r.id))
@@ -57,8 +59,9 @@ export function StaffMemberPage() {
       confirmText: opts.confirmText,
       confirmLabel: title,
       run: async (reason) => {
-        const res = await api.post<{ setupLink?: string }>(`staff/${s.id}/${path}`, { reason })
-        if (res.setupLink) setNotice(`New one-time setup link (send it over a trusted channel): ${res.setupLink}`)
+        const res = await api.post<{ setupLink?: string; expiresAt?: string }>(`staff/${s.id}/${path}`, { reason })
+        if (res.setupLink) setInvite({ link: res.setupLink, name: s.name, email: s.email, expiresAt: res.expiresAt })
+        else toast.success(`${title}: done`)
         await reload()
       },
     })
@@ -70,7 +73,8 @@ export function StaffMemberPage() {
       confirmLabel: 'Save roles',
       run: async (reason) => {
         const res = await api.put<{ status: string; approvalId?: number }>(`staff/${s.id}/roles`, { roles: picked, reason })
-        setNotice(res.status === 'pending_approval' ? `Approval request #${res.approvalId} created for Super Admin.` : 'Roles saved.')
+        if (res.status === 'pending_approval') toast.info(`Approval request #${res.approvalId} created: another Super Admin must approve.`)
+        else toast.success('Roles saved')
         await reload()
       },
     })
@@ -84,13 +88,30 @@ export function StaffMemberPage() {
           manage &&
           !self && (
             <>
+              {s.status === 'invited' && (
+                <Button
+                  variant="primary"
+                  icon={<Send />}
+                  onClick={async () => {
+                    try {
+                      const res = await api.post<{ setupLink: string; expiresAt: string }>(`staff/${s.id}/invite-link`)
+                      setInvite({ link: res.setupLink, name: s.name, email: s.email, expiresAt: res.expiresAt })
+                      await reload()
+                    } catch (err) {
+                      toast.error((err as Error).message)
+                    }
+                  }}
+                >
+                  Share new invite link
+                </Button>
+              )}
               {s.status === 'active' && (
                 <Button icon={<ShieldOff className="size-4" />} onClick={() => act('disable', 'Disable account', 'Signs them out everywhere and blocks sign-in. Do this the day someone leaves.', { danger: true })}>
                   Disable
                 </Button>
               )}
               {s.status === 'disabled' && (
-                <Button icon={<ShieldCheck className="size-4" />} onClick={() => act('enable', 'Enable account', 'They can sign in again with their existing password and authenticator.')}>
+                <Button icon={<ShieldCheck className="size-4" />} onClick={() => act('enable', 'Enable account', 'They can sign in again with their existing password.')}>
                   Enable
                 </Button>
               )}
@@ -104,14 +125,16 @@ export function StaffMemberPage() {
           )
         }
       />
-      {notice && <div className="mb-4 break-all rounded-lg border border-line bg-success-soft px-3 py-2 text-sm text-success">{notice}</div>}
+      <Modal open={!!invite} title={`Share ${s.name.split(/\s+/)[0]}’s setup link`} onClose={() => setInvite(null)} footer={<Button variant="primary" onClick={() => setInvite(null)}>Done</Button>}>
+        {invite && <ShareInvite {...invite} />}
+      </Modal>
       <div className="grid gap-6 lg:grid-cols-2">
         <Card title="Account">
           <KeyValue
             items={[
               ['Status', <><Badge tone={STATUS_TONE[s.status]}>{s.status}</Badge> {s.lockedUntil && <Badge tone="red">locked until {fmtDateTime(s.lockedUntil)}</Badge>}</>],
-              ['Two-step verification', s.mfaEnabled ? <Badge tone="green">on</Badge> : <Badge tone="amber">not set up</Badge>],
-              ['Recovery codes left', s.recoveryCodesLeft],
+              ['Second sign-in step', <SignInStep hasApp={s.mfaEnabled} />],
+              ...(s.mfaEnabled ? ([['Recovery codes left', s.recoveryCodesLeft]] as [string, number][]) : []),
               ['Last sign-in', `${fmtDateTime(s.lastLoginAt)}${s.lastLoginIp ? ` from ${s.lastLoginIp}` : ''}`],
               ['Created', fmtDateTime(s.createdAt)],
               ...(s.setupExpiresAt ? ([['Setup link expires', fmtDateTime(s.setupExpiresAt)]] as [string, string][]) : []),
@@ -129,7 +152,7 @@ export function StaffMemberPage() {
           ) : (
             <div className="flex flex-wrap gap-1">{s.roles.map((r) => <Badge key={r.id} tone="blue">{r.name}</Badge>)}</div>
           )}
-          {self && <p className="mt-2 text-xs text-ink-3">You can’t change your own roles; another admin can.</p>}
+          {self && <p className="mt-2 text-xs text-muted-foreground">You can’t change your own roles; another admin can.</p>}
         </Card>
         <Card title="Signed in on" className="lg:col-span-2" padded={false}>
           <Table head={['Device', 'IP', 'Since', 'Last active']}>
@@ -141,7 +164,7 @@ export function StaffMemberPage() {
                 <Td>{fmtAgo(x.lastSeenAt)}</Td>
               </tr>
             ))}
-            {!s.sessions.length && <tr><Td className="text-ink-3">No active sessions.</Td></tr>}
+            {!s.sessions.length && <tr><Td className="text-muted-foreground">No active sessions.</Td></tr>}
           </Table>
         </Card>
       </div>

@@ -30,12 +30,14 @@ router
     router.get('auth/setup/:token', [AuthController, 'setupInfo'])
     router.post('auth/setup/:token', [AuthController, 'completeSetup'])
     router.post('auth/mfa', [AuthController, 'mfa']).use(middleware.auth({ pending: true }))
+    router.post('auth/mfa/resend', [AuthController, 'resendCode']).use(middleware.auth({ pending: true }))
 
     router
       .group(() => {
         // My account
         router.get('auth/me', [AuthController, 'me'])
         router.post('auth/logout', [AuthController, 'logout'])
+        router.post('auth/step-up/send', [AuthController, 'sendStepUpCode'])
         router.post('auth/step-up', [AuthController, 'stepUp'])
         router.post('auth/password', [AuthController, 'changePassword'])
         router.post('auth/recovery-codes', [AuthController, 'recoveryCodes']).use(middleware.freshMfa())
@@ -158,6 +160,10 @@ router
           .use(middleware.can(['console.staff.manage']))
         router
           .post('staff/:id/reset-access', [StaffController, 'resetAccess'])
+          .where('id', id.id)
+          .use(middleware.can(['console.staff.manage']))
+        router
+          .post('staff/:id/invite-link', [StaffController, 'reissueInvite'])
           .where('id', id.id)
           .use(middleware.can(['console.staff.manage']))
         router

@@ -1,16 +1,20 @@
 import { DateTime } from 'luxon'
 import hash from '@adonisjs/core/services/hash'
 import encryption from '@adonisjs/core/services/encryption'
+import logger from '@adonisjs/core/services/logger'
 import db from '@adonisjs/lucid/services/db'
 import ConsoleUser from '#models/console_user'
 import type ConsoleSession from '#models/console_session'
 import ApiException from '#exceptions/api_exception'
-import consoleConfig from '#config/console'
+import consoleConfig, { type MfaMethod } from '#config/console'
 import auditService from '#services/audit_service'
+import emailCodeService from '#services/email_code_service'
+import mailService from '#services/mail_service'
 import sessionService, { type ClientMeta } from '#services/session_service'
 import settingsService from '#services/settings_service'
 import { FixedWindowLimiter } from '#helpers/rate_limiter'
 import { passwordProblem } from '#helpers/password_policy'
+import { maskEmail } from '#helpers/mask'
 import { normaliseRecoveryCode, recoveryCode, sha256 } from '#helpers/tokens'
 import { generateSecret, otpauthUri, verifyTotp } from '#helpers/totp'
 import type { Actor } from '#services/actor'
@@ -37,6 +41,30 @@ function lockedMessage(until: DateTime) {
 }
 
 class AuthService {
+  /**
+   * The second sign-in step in force: the policy's choice, except that email codes need
+   * a way to send them (SMTP, or the dev outbox). Without one, production keeps using
+   * authenticator codes rather than locking everyone out.
+   */
+  async method(): Promise<MfaMethod> {
+    const { mfa_method: method } = await settingsService.all()
+    if (method === 'email' && !mailService.canSend) {
+      logger.warn('mfa_method is email but SMTP is not configured: falling back to authenticator codes')
+      return 'totp'
+    }
+    return method
+  }
+
+  /** The method for one person: someone without an authenticator can't use TOTP. */
+  private async methodFor(user: ConsoleUser): Promise<MfaMethod> {
+    const method = await this.method()
+    if (method === 'totp' && !user.mfaSecret) {
+      if (mailService.canSend) return 'email'
+      throw new ApiException(401, 'Your account has no authenticator set up. Ask an admin to reset your access.', 'NO_SECOND_FACTOR')
+    }
+    return method
+  }
+
   async login(emailInput: string, password: string, meta: ClientMeta) {
     const email = emailInput.trim().toLowerCase()
     const ipHit = limiter.hit(`ip:${meta.ip}`, IP_LIMIT.limit, IP_LIMIT.windowMs)
@@ -71,7 +99,7 @@ class AuthService {
       await this.countFailure(user, 'bad_password', meta)
       throw new ApiException(401, BAD_LOGIN, 'BAD_CREDENTIALS')
     }
-    if (user.status !== 'active' || !user.mfaSecret) {
+    if (user.status !== 'active') {
       await auditService.record({ actorId: user.id, actorEmail: email, action: 'auth.login', outcome: 'denied', reason: `status_${user.status}`, ...meta })
       throw new ApiException(401, BAD_LOGIN, 'BAD_CREDENTIALS')
     }
@@ -79,7 +107,24 @@ class AuthService {
     user.failedLogins = 0
     user.lockedUntil = null
     await user.save()
-    return sessionService.create(user.id, 'mfa_pending', meta)
+    const method = await this.methodFor(user)
+
+    if (method === 'off') {
+      // Password only (Security policy): straight to an active session.
+      const result = await sessionService.create(user.id, 'active', meta, DateTime.now())
+      await this.signedIn(user, meta, 'password', result.session.id)
+      return { ...result, method, sentTo: null }
+    }
+    const pending = await sessionService.create(user.id, 'mfa_pending', meta)
+    let sentTo: string | null = null
+    if (method === 'email') sentTo = (await emailCodeService.send(user, pending.session.id, 'login')).sentTo
+    return { ...pending, method, sentTo }
+  }
+
+  async resendLoginCode(pending: ConsoleSession) {
+    const user = await ConsoleUser.findOrFail(pending.userId)
+    if ((await this.methodFor(user)) !== 'email') throw new ApiException(409, 'Sign-in codes come from your authenticator app.')
+    return emailCodeService.send(user, pending.id, 'login')
   }
 
   /** Second step of sign-in. Returns the new (rotated) active session. */
@@ -89,7 +134,13 @@ class AuthService {
       await sessionService.revoke(pending, 'not_active')
       throw new ApiException(401, 'Your account is not active.', 'NOT_ACTIVE')
     }
-    const method = await this.checkSecondFactor(user, code)
+    const expected = await this.methodFor(user)
+    const method =
+      expected === 'email'
+        ? (await emailCodeService.verify(pending.id, 'login', code))
+          ? ('email' as const)
+          : await this.checkSecondFactor(user, code)
+        : await this.checkSecondFactor(user, code)
     if (!method) {
       const attempts = (mfaAttempts.get(pending.id) ?? 0) + 1
       mfaAttempts.set(pending.id, attempts)
@@ -99,30 +150,37 @@ class AuthService {
         await sessionService.revoke(pending, 'mfa_failed')
         throw new ApiException(401, 'Too many wrong codes. Sign in again.', 'MFA_RESTART')
       }
-      throw new ApiException(401, 'That code is not right. Check your authenticator app.', 'BAD_MFA')
+      throw new ApiException(401, expected === 'email' ? 'That code is not right, or it expired. Check the latest email.' : 'That code is not right. Check your authenticator app.', 'BAD_MFA')
     }
     mfaAttempts.delete(pending.id)
-    user.failedLogins = 0
-    user.lastLoginAt = DateTime.now()
-    user.lastLoginIp = meta.ip
-    await user.save()
     const result = await sessionService.activate(pending, meta)
-    await auditService.record({
-      actorId: user.id,
-      actorEmail: user.email,
-      action: 'auth.login',
-      metadata: { method, session_id: result.session.id },
-      ...meta,
-    })
+    await this.signedIn(user, meta, method, result.session.id)
     return result
   }
 
-  /** Fresh MFA proof for critical actions ("sudo mode"). */
-  async stepUp(actor: Actor, code: string) {
-    const method = await this.checkSecondFactor(actor.user, code)
+  /** Sends the step-up code by email (when that is the method). */
+  async sendStepUpCode(actor: Actor) {
+    if ((await this.methodFor(actor.user)) !== 'email') return { sentTo: null }
+    return emailCodeService.send(actor.user, actor.session.id, 'step_up')
+  }
+
+  /**
+   * Fresh proof for critical actions ("sudo mode"): an email code, an authenticator code
+   * (or recovery code), or, when the second step is off, the password again.
+   */
+  async stepUp(actor: Actor, input: { code?: string; password?: string }) {
+    const expected = await this.methodFor(actor.user)
+    let method: string | null = null
+    if (expected === 'off') {
+      method = actor.user.passwordHash && input.password && (await hash.verify(actor.user.passwordHash, input.password)) ? 'password' : null
+    } else if (expected === 'email') {
+      method = (await emailCodeService.verify(actor.session.id, 'step_up', input.code ?? '')) ? 'email' : await this.checkSecondFactor(actor.user, input.code ?? '')
+    } else {
+      method = await this.checkSecondFactor(actor.user, input.code ?? '')
+    }
     if (!method) {
-      await this.countFailure(actor.user, 'bad_step_up_code', actor)
-      throw new ApiException(401, 'That code is not right.', 'BAD_MFA')
+      await this.countFailure(actor.user, 'bad_step_up', actor)
+      throw new ApiException(401, expected === 'off' ? 'That password is not right.' : 'That code is not right.', 'BAD_MFA')
     }
     actor.session.mfaAt = DateTime.now()
     await actor.session.save()
@@ -131,41 +189,51 @@ class AuthService {
 
   async setupInfo(token: string) {
     const user = await this.userForSetupToken(token)
+    const method = await this.method()
+    const base = { email: user.email, name: user.name, passwordMin: consoleConfig.password.min, mfaMethod: method }
+    if (method !== 'totp') return { ...base, secret: null, otpauthUri: null }
     if (!user.mfaPendingSecret) {
       user.mfaPendingSecret = encryption.encrypt(generateSecret())
       await user.save()
     }
     const secret = encryption.decrypt<string>(user.mfaPendingSecret)!
-    return {
-      email: user.email,
-      name: user.name,
-      secret,
-      otpauthUri: otpauthUri(secret, user.email),
-      passwordMin: consoleConfig.password.min,
-    }
+    return { ...base, secret, otpauthUri: otpauthUri(secret, user.email) }
   }
 
-  /** Accepts an invite / access reset: password + confirmed MFA. Returns recovery codes once. */
-  async completeSetup(token: string, password: string, code: string, meta: ClientMeta) {
+  /**
+   * Accepts an invite / access reset. With authenticator codes: password + a confirmed
+   * TOTP, and recovery codes returned once. With email codes (or none): the password only.
+   */
+  async completeSetup(token: string, password: string, code: string | undefined, meta: ClientMeta) {
     const user = await this.userForSetupToken(token)
     const problem = passwordProblem(password, user)
     if (problem) throw new ApiException(422, problem, 'WEAK_PASSWORD')
-    if (!user.mfaPendingSecret) throw new ApiException(409, 'Reload the page and scan the QR code again.')
-    const secret = encryption.decrypt<string>(user.mfaPendingSecret)!
-    const step = verifyTotp(secret, code)
-    if (step === null) throw new ApiException(401, 'That code is not right. Check your authenticator app.', 'BAD_MFA')
+    const method = await this.method()
 
-    const codes = Array.from({ length: consoleConfig.recoveryCodes }, recoveryCode)
+    let totp: { secret: string; step: number } | null = null
+    if (method === 'totp') {
+      if (!user.mfaPendingSecret) throw new ApiException(409, 'Reload the page and scan the QR code again.')
+      const secret = user.mfaPendingSecret
+      const step = verifyTotp(encryption.decrypt<string>(secret)!, code ?? '')
+      if (step === null) throw new ApiException(401, 'That code is not right. Check your authenticator app.', 'BAD_MFA')
+      totp = { secret, step }
+    }
+
+    const codes = totp ? Array.from({ length: consoleConfig.recoveryCodes }, recoveryCode) : []
     await db.transaction(async (trx) => {
       user.useTransaction(trx)
       user.merge({
         passwordHash: await hash.make(password),
         passwordChangedAt: DateTime.now(),
-        mfaSecret: user.mfaPendingSecret,
-        mfaPendingSecret: null,
-        mfaEnabledAt: DateTime.now(),
-        mfaLastStep: step,
-        recoveryCodes: codes.map((c) => sha256(normaliseRecoveryCode(c))),
+        ...(totp
+          ? {
+              mfaSecret: totp.secret,
+              mfaPendingSecret: null,
+              mfaEnabledAt: DateTime.now(),
+              mfaLastStep: totp.step,
+              recoveryCodes: codes.map((c) => sha256(normaliseRecoveryCode(c))),
+            }
+          : {}),
         setupTokenHash: null,
         setupExpiresAt: null,
         status: 'active',
@@ -174,7 +242,7 @@ class AuthService {
       })
       await user.save()
       await auditService.record(
-        { actorId: user.id, actorEmail: user.email, action: 'staff.setup_completed', targetType: 'staff', targetId: user.id, ...meta },
+        { actorId: user.id, actorEmail: user.email, action: 'staff.setup_completed', targetType: 'staff', targetId: user.id, metadata: { mfa: method }, ...meta },
         trx
       )
     })
@@ -203,6 +271,7 @@ class AuthService {
   }
 
   async regenerateRecoveryCodes(actor: Actor) {
+    if (!actor.user.mfaSecret) throw new ApiException(409, 'Recovery codes are for authenticator-app sign-in.')
     const codes = Array.from({ length: consoleConfig.recoveryCodes }, recoveryCode)
     await db.transaction(async (trx) => {
       actor.user.useTransaction(trx)
@@ -211,6 +280,19 @@ class AuthService {
       await auditService.record({ actor, action: 'auth.recovery_codes_regenerated', targetType: 'staff', targetId: actor.user.id }, trx)
     })
     return codes
+  }
+
+  /** The masked email codes go to, for the UI. */
+  sentToFor(user: ConsoleUser) {
+    return maskEmail(user.email)
+  }
+
+  private async signedIn(user: ConsoleUser, meta: ClientMeta, method: string, sessionId: number) {
+    user.failedLogins = 0
+    user.lastLoginAt = DateTime.now()
+    user.lastLoginIp = meta.ip
+    await user.save()
+    await auditService.record({ actorId: user.id, actorEmail: user.email, action: 'auth.login', metadata: { method, session_id: sessionId }, ...meta })
   }
 
   /** 'totp' | 'recovery_code' when the code is valid (and consumes it), else null. */

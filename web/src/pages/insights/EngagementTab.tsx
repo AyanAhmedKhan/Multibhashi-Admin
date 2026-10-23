@@ -44,16 +44,16 @@ export function EngagementTab({ days }: { days: number }) {
                 <div className="mb-1 flex justify-between text-sm">
                   <span className="text-ink-2">{i + 1}. {f.step}</span>
                   <span className="tabular font-medium">
-                    {fmtInt(f.users)} <span className="font-normal text-ink-3">({Math.round((f.users / top) * 100)}%)</span>
+                    {fmtInt(f.users)} <span className="font-normal text-muted-foreground">({Math.round((f.users / top) * 100)}%)</span>
                   </span>
                 </div>
-                <div className="h-2 rounded-full bg-surface-2">
+                <div className="h-2 rounded-full bg-muted">
                   <div className="h-2 rounded-full bg-chart" style={{ width: `${(f.users / top) * 100}%` }} />
                 </div>
               </li>
             ))}
           </ul>
-          <p className="mt-3 text-xs text-ink-3">Learners in the period who did each step and every step before it. The biggest drop is where to improve the app first.</p>
+          <p className="mt-3 text-xs text-muted-foreground">Learners in the period who did each step and every step before it. The biggest drop is where to improve the app first.</p>
         </Card>
       </div>
 
@@ -71,7 +71,7 @@ export function EngagementTab({ days }: { days: number }) {
             </tr>
           ))}
         </Table>
-        <p className="px-4 py-3 text-xs text-ink-3">Engaged time excludes idle time (no touch or scroll past the screen’s threshold). A high idle share means learners leave the screen open without using it.</p>
+        <p className="px-4 py-3 text-xs text-muted-foreground">Engaged time excludes idle time (no touch or scroll past the screen’s threshold). A high idle share means learners leave the screen open without using it.</p>
       </Card>
 
       <div className="grid gap-6 lg:grid-cols-2">

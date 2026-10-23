@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Bot, PhoneOff, User } from 'lucide-react'
+import { toast } from 'sonner'
 import { api } from '../../lib/api'
 import { useAuth } from '../../lib/auth'
 import { fmtAgo, fmtMinutes } from '../../lib/format'
@@ -33,6 +34,7 @@ export function LivePage() {
       danger: true,
       run: async (reason) => {
         await api.post(`tutor/live/${encodeURIComponent(room.room)}/end`, { reason })
+        toast.success('Class ended. The learner can resume with the minutes left.')
         await queryClient.invalidateQueries({ queryKey: ['live'] })
       },
     })
@@ -56,14 +58,14 @@ export function LivePage() {
                       #{r.class.id}
                     </Link>
                   ) : (
-                    <span className="text-ink-3">no record</span>
+                    <span className="text-muted-foreground">no record</span>
                   )}
-                  <div className="mt-0.5 max-w-[14rem] truncate text-xs text-ink-3">{r.room}</div>
+                  <div className="mt-0.5 max-w-[14rem] truncate text-xs text-muted-foreground">{r.room}</div>
                 </Td>
                 <Td>
                   {r.class?.topic ?? '—'}
                   {r.class && (
-                    <div className="text-xs text-ink-3">
+                    <div className="text-xs text-muted-foreground">
                       Learner <Link className="text-primary" to={`/learners/${r.class.userId}`}>#{r.class.userId}</Link>
                     </div>
                   )}
@@ -76,7 +78,7 @@ export function LivePage() {
                         {p.isAgent ? 'Tutor' : 'Learner'}
                       </Badge>
                     ))}
-                    {!r.participants.length && <span className="text-xs text-ink-3">empty</span>}
+                    {!r.participants.length && <span className="text-xs text-muted-foreground">empty</span>}
                   </div>
                 </Td>
                 <Td>{fmtAgo(r.createdAt)}</Td>

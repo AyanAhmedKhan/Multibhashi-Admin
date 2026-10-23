@@ -2,6 +2,7 @@ import db from '@adonisjs/lucid/services/db'
 import { RoomServiceClient } from 'livekit-server-sdk'
 import env from '#start/env'
 import livekitConfig from '#config/livekit'
+import mailService from '#services/mail_service'
 
 type Check = { name: string; ok: boolean; ms: number; detail?: string }
 
@@ -30,6 +31,7 @@ class HealthService {
         const rooms = await new RoomServiceClient(livekitConfig.url, livekitConfig.apiKey, livekitConfig.apiSecret).listRooms()
         return `${rooms.length} room(s) open`
       }),
+      timed('Email (SMTP)', async () => mailService.verify()),
       tutorUrl
         ? timed('Tutor API', async () => {
             const res = await fetch(new URL('/health/ready', tutorUrl))

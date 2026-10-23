@@ -1,18 +1,51 @@
 @import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "@fontsource-variable/geist";
 
-/* MultiBhashi brand (matches the app's tokens), light and dark. */
+/* Dark mode follows the `.dark` class (next-themes: light / dark / system). */
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * MultiBhashi brand on shadcn's tokens. The older console tokens (surface, ink, line…)
+ * are aliases of these, so every screen shares one palette in both themes.
+ */
 :root {
-  --bg: #f7f9fc;
-  --surface: #ffffff;
-  --surface-2: #f1f5f9;
-  --ink: #0f172a;
-  --ink-2: #475569;
-  --ink-3: #64748b;
-  --line: #e5eaf1;
+  --radius: 0.75rem;
+  --background: #f6f8fb;
+  --foreground: #0f172a;
+  --card: #ffffff;
+  --card-foreground: #0f172a;
+  --popover: #ffffff;
+  --popover-foreground: #0f172a;
   --primary: #1976d2;
-  --primary-strong: #1565c0;
-  --primary-soft: #e9f5fe;
-  --brand: #17aaf5;
+  --primary-foreground: #ffffff;
+  --secondary: #eef4fb;
+  --secondary-foreground: #0f4f8c;
+  --muted: #f1f5f9;
+  --muted-foreground: #64748b;
+  --accent: #e9f5fe;
+  --accent-foreground: #1565c0;
+  --destructive: #b91c1c;
+  --border: #e3e8ef;
+  --input: #dfe5ee;
+  --ring: #1976d2;
+  /* Chart marks: validated with the dataviz palette checker against each surface. */
+  --chart-1: #1976d2;
+  --chart-2: #64748b;
+  --chart-3: #0f4f8c;
+  --chart-4: #94a3b8;
+  --chart-5: #334155;
+  --sidebar: #ffffff;
+  --sidebar-foreground: #0f172a;
+  --sidebar-primary: #1976d2;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #eef5fd;
+  --sidebar-accent-foreground: #1565c0;
+  --sidebar-border: #e3e8ef;
+  --sidebar-ring: #1976d2;
+
+  /* Status (never used for chart series). */
   --success: #047857;
   --success-soft: #ecfdf5;
   --warning: #a35a06;
@@ -21,50 +54,111 @@
   --danger-soft: #fef2f2;
   --violet: #4f63d8;
   --violet-soft: #eef2fd;
-  /* chart marks: validated (dataviz validate_palette) against each surface */
-  --chart: #1976d2;
-  --chart-grid: #e5eaf1;
+  --brand: #17aaf5;
+  --primary-strong: #1565c0;
+  --ink-2: #475569;
+  --chart-grid: #e3e8ef;
   color-scheme: light;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0b1220;
-    --surface: #111a2c;
-    --surface-2: #17223a;
-    --ink: #e6edf7;
-    --ink-2: #b4c0d3;
-    --ink-3: #8a98ae;
-    --line: #23314d;
-    --primary: #4c9df0;
-    --primary-strong: #6cb0f5;
-    --primary-soft: #14284a;
-    --brand: #38bdf8;
-    --success: #34d399;
-    --success-soft: #0f2a22;
-    --warning: #fbbf24;
-    --warning-soft: #2c2210;
-    --danger: #f87171;
-    --danger-soft: #2d1416;
-    --violet: #8b9cf5;
-    --violet-soft: #1c2246;
-    --chart: #3b8ee6;
-    --chart-grid: #23314d;
-    color-scheme: dark;
-  }
+.dark {
+  --background: #0a101c;
+  --foreground: #e6edf7;
+  --card: #101827;
+  --card-foreground: #e6edf7;
+  --popover: #121b2c;
+  --popover-foreground: #e6edf7;
+  --primary: #4c9df0;
+  --primary-foreground: #08111f;
+  --secondary: #16223a;
+  --secondary-foreground: #b9d6f7;
+  --muted: #16203a;
+  --muted-foreground: #8a98ae;
+  --accent: #13274a;
+  --accent-foreground: #8fc2f8;
+  --destructive: #f87171;
+  --border: #1f2c45;
+  --input: #263552;
+  --ring: #4c9df0;
+  --chart-1: #3b8ee6;
+  --chart-2: #8a98ae;
+  --chart-3: #8fc2f8;
+  --chart-4: #475569;
+  --chart-5: #cbd5e1;
+  --sidebar: #0c1422;
+  --sidebar-foreground: #e6edf7;
+  --sidebar-primary: #4c9df0;
+  --sidebar-primary-foreground: #08111f;
+  --sidebar-accent: #15233d;
+  --sidebar-accent-foreground: #8fc2f8;
+  --sidebar-border: #1c2840;
+  --sidebar-ring: #4c9df0;
+
+  --success: #34d399;
+  --success-soft: #0d2a22;
+  --warning: #fbbf24;
+  --warning-soft: #2b210d;
+  --danger: #f87171;
+  --danger-soft: #2c1417;
+  --violet: #9aa8f7;
+  --violet-soft: #1b2147;
+  --brand: #38bdf8;
+  --primary-strong: #8fc2f8;
+  --ink-2: #b4c0d3;
+  --chart-grid: #1f2c45;
+  color-scheme: dark;
 }
 
 @theme inline {
-  --color-bg: var(--bg);
-  --color-surface: var(--surface);
-  --color-surface-2: var(--surface-2);
-  --color-ink: var(--ink);
-  --color-ink-2: var(--ink-2);
-  --color-ink-3: var(--ink-3);
-  --color-line: var(--line);
+  --font-sans: "Geist Variable", ui-sans-serif, system-ui, "Segoe UI", "Noto Sans", "Noto Sans Devanagari", sans-serif;
+  --font-heading: var(--font-sans);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
   --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+
+  /* Console aliases (older screens) */
+  --color-bg: var(--background);
+  --color-surface: var(--card);
+  --color-surface-2: var(--muted);
+  --color-ink: var(--foreground);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--muted-foreground);
+  --color-line: var(--border);
   --color-primary-strong: var(--primary-strong);
-  --color-primary-soft: var(--primary-soft);
+  --color-primary-soft: var(--accent);
   --color-brand: var(--brand);
   --color-success: var(--success);
   --color-success-soft: var(--success-soft);
@@ -74,27 +168,24 @@
   --color-danger-soft: var(--danger-soft);
   --color-violet: var(--violet);
   --color-violet-soft: var(--violet-soft);
-  --color-chart: var(--chart);
-  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans",
-    "Noto Sans Devanagari", sans-serif;
+  --color-chart: var(--chart-1);
 }
 
-html,
-body,
-#root {
-  height: 100%;
-}
-
-body {
-  background: var(--bg);
-  color: var(--ink);
-  font-family: var(--font-sans);
-  -webkit-font-smoothing: antialiased;
-}
-
-:focus-visible {
-  outline: 2px solid var(--primary);
-  outline-offset: 2px;
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    @apply font-sans;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+  }
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
 }
 
 .tabular {

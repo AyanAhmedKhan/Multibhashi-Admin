@@ -55,12 +55,12 @@ export function AuditPage() {
         }
       />
       {verify && (
-        <div className={`mb-4 rounded-lg border border-line px-3 py-2 text-sm ${verify.ok ? 'bg-success-soft text-success' : 'bg-danger-soft text-danger'}`}>
+        <div className={`mb-4 rounded-lg border border-border px-3 py-2 text-sm ${verify.ok ? 'bg-success-soft text-success' : 'bg-danger-soft text-danger'}`}>
           {verify.ok ? `Chain intact: ${verify.checked.toLocaleString('en-IN')} entries verified.` : `Chain broken at entry #${verify.brokenAt}: the log was altered. Escalate to the Super Admins.`}
         </div>
       )}
       <Card padded={false}>
-        <div className="flex flex-wrap gap-3 border-b border-line p-4">
+        <div className="flex flex-wrap gap-3 border-b border-border p-4">
           <Input aria-label="Search" className="min-w-[12rem] flex-1" placeholder="Email, reason or target id…" value={filters.q} onChange={(e) => set({ q: e.target.value })} />
           <Select aria-label="Action" className="w-48" value={filters.action} onChange={(e) => set({ action: e.target.value })}>
             <option value="">Any action</option>
@@ -93,11 +93,11 @@ export function AuditPage() {
             <Table head={['When', 'Who', 'What', 'Target', 'Why', '']}>
               {(log.data?.data ?? []).map((r) => (
                 <Fragment key={r.id}>
-                  <tr className="hover:bg-surface-2">
+                  <tr className="hover:bg-muted">
                     <Td className="whitespace-nowrap text-ink-2">{fmtDateTime(r.created_at)}</Td>
                     <Td>
                       <div className="max-w-[14rem] truncate">{r.actor_email ?? 'system'}</div>
-                      <div className="text-xs text-ink-3">{r.ip}</div>
+                      <div className="text-xs text-muted-foreground">{r.ip}</div>
                     </Td>
                     <Td>
                       <div>{humanAction(r.action)}</div>
@@ -115,7 +115,7 @@ export function AuditPage() {
                   </tr>
                   {open === r.id && (
                     <tr>
-                      <td colSpan={6} className="bg-surface-2 px-4 py-3">
+                      <td colSpan={6} className="bg-muted px-4 py-3">
                         <pre className="max-h-64 overflow-auto whitespace-pre-wrap text-xs text-ink-2">{JSON.stringify(r.metadata, null, 2)}</pre>
                       </td>
                     </tr>

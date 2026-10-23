@@ -7,7 +7,7 @@ CRM, bookings, finance, trainers, classes, content, B2B and marketing next. The 
 
 ```
 api/   AdonisJS 6 (TypeScript) JSON API under /api   port 3500
-web/   React 18 + Vite + Tailwind single-page app     port 5175 (proxies /api)
+web/   React 19 + Vite + Tailwind + shadcn/ui app     port 5175 (proxies /api)
 docs/  PLAN.md
 .env   shared by api/ (see .env.example)
 ```
@@ -32,20 +32,24 @@ npm run dev                                    # API on http://localhost:3500
 cd ../web && npm install && npm run dev        # console on http://localhost:5175
 ```
 
-First Super Admin (prints a one-time setup link where they choose a password and scan the
-authenticator QR code):
+First Super Admin (prints a one-time setup link where they choose a password; with the
+authenticator policy they also scan a QR code):
 
 ```bash
 cd api && node --env-file=../.env ace console:bootstrap --email=you@company.com --name="Your Name"
 ```
 
-Everyone else is invited from **Staff** in the console.
+Everyone else, including a second Super Admin, is invited from **Staff** in the console
+(the invite can be emailed, or shared by link, WhatsApp or QR code).
+
+Sign-in codes: without SMTP settings, local dev writes each email (code or invite) as JSON
+to `api/tmp/mail/`; the subject starts with the code.
 
 ## Tests
 
 ```bash
 cd api
-node --env-file=../.env ace test unit                    # TOTP vectors, masking, password policy, role invariants
+node --env-file=../.env ace test unit                    # TOTP vectors, masking, password policy, cost model, role invariants
 PORT=3510 node --env-file=../.env ace test functional    # end-to-end HTTP flows on the local DB
 cd ../web && npx tsc --noEmit -p tsconfig.json && npx vite build
 ```
@@ -76,8 +80,14 @@ erase). The demo/dev commands and the test suite refuse to run against a non-loc
   that `https://` origin.
 - Give the API its own MySQL user (writes only on the tables listed in PLAN.md §2;
   INSERT/SELECT only on `console_audit_logs`) and point `DB_ANALYTICS_*` at a read replica.
-- `APP_KEY` signs sessions and encrypts MFA secrets: keep it in the secret store; rotating
-  it signs everyone out and forces MFA re-enrolment.
+- `APP_KEY` signs sessions, hashes email codes and encrypts authenticator secrets: keep it in
+  the secret store; rotating it signs everyone out (and forces authenticator re-enrolment).
+- Email (sign-in codes and invites) with Gmail: turn on 2-Step Verification on the Google
+  account, create an App Password (Google Account → Security → App passwords), then set
+  `SMTP_HOST=smtp.gmail.com`, `SMTP_PORT=465`, `SMTP_SECURE=true`, `SMTP_USER=<the Gmail
+  address>`, `SMTP_PASSWORD=<the 16-character app password>`,
+  `MAIL_FROM="MultiBhashi Console <the Gmail address>"`. System health shows whether it
+  connects. Until SMTP is set, production uses the authenticator app instead of email codes.
 - Run `console:sync-roles` after every deploy that changes `app/rbac/roles.ts`.
 - `console:dev-schema` and `console:seed-demo` refuse to run unless `NODE_ENV=development`
   and the database is on localhost.

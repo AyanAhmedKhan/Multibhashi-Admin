@@ -7,6 +7,9 @@ import rbacService from '#services/rbac_service'
 import consoleConfig from '#config/console'
 import { hotp, timeStep } from '#helpers/totp'
 import { randomToken, sha256 } from '#helpers/tokens'
+import settingsService from '#services/settings_service'
+import { readdir, readFile } from 'node:fs/promises'
+import app from '@adonisjs/core/services/app'
 import type { ApiClient, ApiRequest } from '@japa/api-client'
 
 /**
@@ -99,17 +102,44 @@ async function signIn(client: ApiClient, email: string, userId: number): Promise
   return { cookie, csrf: me.body().csrfToken, userId }
 }
 
+/** Sets the second sign-in step for the tests (the group restores what was there). */
+async function setMfaMethod(method: 'email' | 'totp' | 'off') {
+  await db.from('console_settings').where('key', 'mfa_method').delete()
+  await db.table('console_settings').insert({ key: 'mfa_method', value: JSON.stringify(method), updated_at: new Date() })
+  settingsService.clearCache()
+}
+
+/** The newest sign-in code emailed to an address (development outbox: api/tmp/mail). */
+async function latestEmailCode(email: string) {
+  const dir = app.makePath('tmp', 'mail')
+  const files = (await readdir(dir)).filter((f) => f.includes(email.replace(/[^a-z0-9@.]/gi, '_'))).sort()
+  const mail = JSON.parse(await readFile(`${dir}/${files[files.length - 1]}`, 'utf8'))
+  return String(mail.subject).slice(0, 6)
+}
+
 function as(client: ApiClient, s: Session, method: 'get' | 'post' | 'put' | 'delete', url: string): ApiRequest {
   return client[method](url).header('origin', ORIGIN).header('cookie', s.cookie).header('x-csrf-token', s.csrf)
 }
 
 test.group('Console end to end', (group) => {
+  let previousMfa: unknown = null
   group.setup(async () => {
+    previousMfa = (await db.from('console_settings').where('key', 'mfa_method').first())?.value ?? null
+    // Most tests drive authenticator codes; the email-code test switches for itself.
+    await setMfaMethod('totp')
     await cleanup()
     await rbacService.syncSystemRoles()
     await db.table('users').insert({ id: LEARNER, phone: '9000002001', name: 'Console Test Learner', email: 'learner2001@test.local' })
   })
-  group.teardown(cleanup)
+  group.teardown(async () => {
+    await cleanup()
+    await db.from('console_settings').where('key', 'mfa_method').delete()
+    if (previousMfa !== null) {
+      const value = typeof previousMfa === 'string' ? previousMfa : JSON.stringify(previousMfa)
+      await db.table('console_settings').insert({ key: 'mfa_method', value, updated_at: new Date() })
+    }
+    settingsService.clearCache()
+  })
 
   test('invite → setup → sign in → roles, grants, approvals, erase, audit', async ({ client, assert }) => {
     // --- a super admin signs in with password + MFA
@@ -438,6 +468,108 @@ test.group('Console end to end', (group) => {
       await db.from('ai_tutor_session_usage').where('ai_tutor_chat_id', chat.id).delete()
     }
   }).timeout(90_000)
+
+  test('a Super Admin invites a Super Admin; links can be reissued; others cannot', async ({ client, assert }) => {
+    const a = await invitedUser('sa-one@test.local', 'super_admin')
+    await completeSetup(client, a.token)
+    const sa = await signIn(client, 'sa-one@test.local', a.user.id)
+    const roles = (await as(client, sa, 'get', '/api/roles')).body().roles as { id: number; slug: string }[]
+    const superRole = roles.find((r) => r.slug === 'super_admin')!
+    const support = roles.find((r) => r.slug === 'support_agent')!
+
+    // Another active Super Admin exists locally, so the new one waits for a second approval
+    const invite = await as(client, sa, 'post', '/api/staff').json({
+      email: 'sa-two@test.local',
+      name: 'Second Owner',
+      roles: [superRole.id],
+      reason: 'Co-founder joins as the second Super Admin (test)',
+    })
+    invite.assertStatus(200)
+    assert.include(invite.body().setupLink, '/setup/')
+    const others = await db
+      .from('console_user_roles as ur')
+      .join('console_users as u', 'u.id', 'ur.user_id')
+      .where('ur.role_id', superRole.id)
+      .where('u.status', 'active')
+      .whereNot('u.id', a.user.id)
+      .count('* as total')
+    if (Number(others[0].total) > 0) {
+      assert.equal(invite.body().superAdmin, 'pending_approval')
+      assert.isNumber(invite.body().approvalId)
+    } else {
+      assert.equal(invite.body().superAdmin, 'granted')
+    }
+
+    // Reissue: the old link stops working, the new one works
+    const oldToken = String(invite.body().setupLink).split('/setup/')[1]
+    const reissue = await as(client, sa, 'post', `/api/staff/${invite.body().user.id}/invite-link`).json({})
+    reissue.assertStatus(200)
+    const newToken = String(reissue.body().setupLink).split('/setup/')[1]
+    assert.notEqual(newToken, oldToken)
+    ;(await client.get(`/api/auth/setup/${oldToken}`)).assertStatus(404)
+    ;(await client.get(`/api/auth/setup/${newToken}`)).assertStatus(200)
+
+    // A non-Super-Admin can't hand out Super Admin
+    const pa = await invitedUser('pa-one@test.local', 'platform_admin')
+    await completeSetup(client, pa.token)
+    const platform = await signIn(client, 'pa-one@test.local', pa.user.id)
+    const denied = await as(client, platform, 'post', '/api/staff').json({
+      email: 'sneaky@test.local',
+      name: 'Sneaky',
+      roles: [superRole.id, support.id],
+      reason: 'should not work (test)',
+    })
+    denied.assertStatus(403)
+  }).timeout(60_000)
+
+  test('email sign-in codes (default) and password-only sign-in', async ({ client, assert }) => {
+    await setMfaMethod('email')
+    try {
+      const e = await invitedUser('mailer@test.local', 'auditor')
+      // With email codes, setup needs only a password: no QR, no recovery codes
+      const info = await client.get(`/api/auth/setup/${e.token}`)
+      assert.equal(info.body().mfaMethod, 'email')
+      assert.isNull(info.body().secret)
+      const setup = await client.post(`/api/auth/setup/${e.token}`).header('origin', ORIGIN).json({ password: PASSWORD })
+      setup.assertStatus(200)
+      assert.deepEqual(setup.body().recoveryCodes, [])
+
+      const login = await client.post('/api/auth/login').header('origin', ORIGIN).json({ email: 'mailer@test.local', password: PASSWORD })
+      login.assertStatus(200)
+      assert.equal(login.body().method, 'email')
+      assert.equal(login.body().sentTo, 'm•••@test.local')
+      const pending = String(login.headers()['set-cookie']).split(';')[0]
+      const send = (path: string, body: object) =>
+        client.post(path).header('origin', ORIGIN).header('cookie', pending).header('x-csrf-token', login.body().csrfToken).json(body)
+      // An immediate resend is throttled; a wrong code is refused
+      ;(await send('/api/auth/mfa/resend', {})).assertStatus(429)
+      ;(await send('/api/auth/mfa', { code: '000000' })).assertStatus(401)
+      const mfa = await send('/api/auth/mfa', { code: await latestEmailCode('mailer@test.local') })
+      mfa.assertStatus(200)
+      const cookie = String(mfa.headers()['set-cookie']).split(';')[0]
+      const me = await client.get('/api/auth/me').header('cookie', cookie)
+      assert.equal(me.body().policy.mfaMethod, 'email')
+      const session = { cookie, csrf: me.body().csrfToken, userId: e.user.id }
+
+      // Step-up by email
+      ;(await as(client, session, 'post', '/api/auth/step-up/send').json({})).assertStatus(200)
+      ;(await as(client, session, 'post', '/api/auth/step-up').json({ code: await latestEmailCode('mailer@test.local') })).assertStatus(200)
+
+      // Password only: straight in, and step-up asks for the password again
+      await setMfaMethod('off')
+      const plain = await client.post('/api/auth/login').header('origin', ORIGIN).json({ email: 'mailer@test.local', password: PASSWORD })
+      plain.assertStatus(200)
+      assert.equal(plain.body().next, 'app')
+      const plainCookie = String(plain.headers()['set-cookie']).split(';')[0]
+      const plainMe = await client.get('/api/auth/me').header('cookie', plainCookie)
+      plainMe.assertStatus(200)
+      const plainSession = { cookie: plainCookie, csrf: plainMe.body().csrfToken, userId: e.user.id }
+      ;(await as(client, plainSession, 'post', '/api/auth/step-up').json({ password: 'wrong password here' })).assertStatus(401)
+      ;(await as(client, plainSession, 'post', '/api/auth/step-up').json({ password: PASSWORD })).assertStatus(200)
+    } finally {
+      await setMfaMethod('totp')
+    }
+  }).timeout(60_000)
 
   test('wrong passwords lock the account; the message never reveals whether it exists', async ({ client, assert }) => {
     const b = await invitedUser('locked@test.local', 'auditor')
