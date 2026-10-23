@@ -1,0 +1,11 @@
+node_modules
+build
+dist
+*.log
+
+# Secrets: every env file except the committed examples
+.env
+.env.*
+**/.env.production
+!.env.example
+!**/.env.production.example

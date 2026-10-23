@@ -1,0 +1,40 @@
+# Admin console on a host that already runs Traefik (network `root_default`, resolver
+# `mytlschallenge`). Copy deploy/.env.production.example to deploy/.env.production and
+# fill it in. Change ADMIN_HOST below to the public name.
+#
+#   docker compose -f deploy/docker-compose.yml build
+#   docker compose -f deploy/docker-compose.yml run --rm admin-api node ace migration:run --force
+#   docker compose -f deploy/docker-compose.yml run --rm admin-api node ace console:sync-roles
+#   docker compose -f deploy/docker-compose.yml run --rm admin-api node ace console:bootstrap --email=… --name="…"
+#   docker compose -f deploy/docker-compose.yml up -d
+
+name: multibhashi-admin
+
+services:
+  admin-api:
+    build: ../api
+    restart: unless-stopped
+    env_file: .env.production
+    networks: [internal]
+    # Not published and not routed by Traefik: only admin-web reaches it.
+
+  admin-web:
+    build: ../web
+    restart: unless-stopped
+    depends_on: [admin-api]
+    networks: [internal, root_default]
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=root_default
+      - traefik.http.routers.mb-admin.rule=Host(`admin.93-127-172-184.sslip.io`)
+      - traefik.http.routers.mb-admin.entrypoints=websecure
+      - traefik.http.routers.mb-admin.tls.certresolver=mytlschallenge
+      - traefik.http.services.mb-admin.loadbalancer.server.port=8080
+      # Recommended until staff sign in only from known networks: an IP allowlist at the edge.
+      # - traefik.http.middlewares.mb-admin-ips.ipallowlist.sourcerange=203.0.113.10/32,198.51.100.0/24
+      # - traefik.http.routers.mb-admin.middlewares=mb-admin-ips
+
+networks:
+  internal: {}
+  root_default:
+    external: true

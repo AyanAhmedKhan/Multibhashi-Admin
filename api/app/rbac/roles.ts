@@ -1,0 +1,328 @@
+import { ALL } from '#rbac/permissions'
+
+/**
+ * System roles: the baseline every MultiBhashi team maps onto. They are written by
+ * `node ace console:sync-roles` (and the bootstrap) and cannot be edited in the UI;
+ * a team that needs something different gets a custom role instead.
+ *
+ * Design rules:
+ * - least privilege: a role gets what the job needs daily, nothing "just in case";
+ * - separation of duties: whoever raises money movement (refund, payout, big grant)
+ *   is not whoever approves it, and the person managing access is not the one
+ *   using it day to day (super admins are few and mostly approve);
+ * - PII is its own permission (masked by default), so most roles work on masked data.
+ * `legacy` lists the monolith role slugs (teachers-dashboard `is:(...)` checks) each
+ * role replaces, for the account migration. Nobody is migrated into super_admin: the
+ * owners name its two holders. The monolith's `teacher` role is not a staff role at all;
+ * trainers get their own portal (docs/PLAN.md).
+ */
+export interface SystemRole {
+  slug: string
+  name: string
+  description: string
+  /** Suggested head count, shown on the Roles page. */
+  seats: string
+  legacy: string[]
+  permissions: string[]
+}
+
+const TUTOR_READ = ['tutor.classes.read', 'tutor.live.read', 'tutor.minutes.read']
+
+export const SYSTEM_ROLES: SystemRole[] = [
+  {
+    slug: 'super_admin',
+    name: 'Super Admin',
+    description:
+      'Owns the console: staff, roles, security policy, approvals. Not a daily-ops account.',
+    seats: '2 (never 1, at most 3)',
+    legacy: [],
+    permissions: [ALL],
+  },
+  {
+    slug: 'platform_admin',
+    name: 'Platform Admin',
+    description:
+      'Runs the business day to day across every module. Cannot change access or security.',
+    seats: '1–2',
+    legacy: ['admin', 'super_admin'],
+    permissions: [
+      'analytics.read',
+      'analytics.cost.read',
+      'tutor.access.read',
+      'tutor.access.grant',
+      'tutor.access.revoke',
+      'overview.dashboard.read',
+      ...TUTOR_READ,
+      'tutor.transcripts.read',
+      'tutor.live.terminate',
+      'tutor.minutes.grant',
+      'tutor.memory.read',
+      'tutor.config.read',
+      'learners.read',
+      'learners.pii.read',
+      'learners.manage',
+      'crm.leads.read',
+      'crm.leads.manage',
+      'crm.leads.assign',
+      'sales.bookings.read',
+      'sales.bookings.manage',
+      'finance.payments.read',
+      'finance.payouts.read',
+      'teachers.read',
+      'teachers.manage',
+      'classes.sessions.read',
+      'classes.sessions.manage',
+      'classes.webinars.read',
+      'classes.webinars.manage',
+      'content.read',
+      'b2b.clients.read',
+      'reports.read',
+      'reports.export',
+      'console.staff.read',
+      'console.roles.read',
+      'console.approvals.decide',
+      'console.audit.read',
+      'system.health.read',
+    ],
+  },
+  {
+    slug: 'ops_manager',
+    name: 'Operations Manager',
+    description: 'Classes, schedules, trainers and the AI tutor; handles escalations.',
+    seats: '1 per ops team',
+    legacy: ['ops_manager', 'relationship_manager'],
+    permissions: [
+      'analytics.read',
+      'tutor.access.read',
+      'tutor.access.grant',
+      'tutor.access.revoke',
+      'overview.dashboard.read',
+      ...TUTOR_READ,
+      'tutor.transcripts.read',
+      'tutor.live.terminate',
+      'tutor.minutes.grant',
+      'tutor.memory.read',
+      'tutor.config.read',
+      'learners.read',
+      'teachers.read',
+      'teachers.availability.manage',
+      'classes.sessions.read',
+      'classes.sessions.manage',
+      'classes.webinars.read',
+      'classes.webinars.manage',
+      'classes.recordings.read',
+      'classes.chats.moderate',
+      'reports.read',
+      'console.approvals.decide',
+      'system.health.read',
+    ],
+  },
+  {
+    slug: 'support_agent',
+    name: 'Support Agent',
+    description:
+      'Answers learners: finds them, checks their classes and minutes, small goodwill grants.',
+    seats: 'as many as the support team',
+    legacy: ['chat_admin'],
+    permissions: [
+      'tutor.access.read',
+      'overview.dashboard.read',
+      ...TUTOR_READ,
+      'tutor.transcripts.read',
+      'tutor.minutes.grant',
+      'learners.read',
+      'sales.bookings.read',
+      'classes.sessions.read',
+      'classes.chats.moderate',
+    ],
+  },
+  {
+    slug: 'sales_manager',
+    name: 'Sales Manager',
+    description: 'Owns the sales team: every lead, assignment, bookings, coupons, sales reports.',
+    seats: '1 per sales team',
+    legacy: ['sales_manager', 'sales_admin'],
+    permissions: [
+      'analytics.read',
+      'tutor.access.read',
+      'tutor.access.grant',
+      'overview.dashboard.read',
+      'learners.read',
+      'learners.pii.read',
+      'crm.leads.read',
+      'crm.leads.manage',
+      'crm.leads.assign',
+      'crm.leads.export',
+      'crm.recordings.read',
+      'crm.config.manage',
+      'sales.bookings.read',
+      'sales.bookings.manage',
+      'sales.coupons.manage',
+      'sales.subscriptions.grant',
+      'tutor.minutes.read',
+      'reports.read',
+      'reports.export',
+      'console.approvals.decide',
+    ],
+  },
+  {
+    slug: 'sales_agent',
+    name: 'Sales Agent',
+    description: 'Works their own assigned leads and creates bookings for them.',
+    seats: 'one per counsellor',
+    legacy: ['agent'],
+    permissions: [
+      'tutor.access.read',
+      'learners.read',
+      'crm.leads.read',
+      'crm.leads.manage',
+      'sales.bookings.read',
+      'sales.bookings.manage',
+    ],
+  },
+  {
+    slug: 'finance',
+    name: 'Finance',
+    description: 'Payments, invoices, refunds and trainer payouts; approves money movement.',
+    seats: '1–2',
+    legacy: ['finance', 'booking_admin'],
+    permissions: [
+      'analytics.read',
+      'analytics.cost.read',
+      'analytics.costs.manage',
+      'tutor.access.read',
+      'tutor.access.revoke',
+      'overview.dashboard.read',
+      'learners.read',
+      'sales.bookings.read',
+      'sales.bookings.cancel',
+      'finance.payments.read',
+      'finance.refunds.request',
+      'finance.refunds.approve',
+      'finance.payouts.read',
+      'finance.payouts.approve',
+      'finance.export',
+      'tutor.minutes.read',
+      'reports.read',
+      'console.approvals.decide',
+    ],
+  },
+  {
+    slug: 'trainer_manager',
+    name: 'Trainer Manager (HR)',
+    description: 'Recruits and manages trainers: profiles, availability, payout figures.',
+    seats: '1–2',
+    legacy: ['hr', 'teacher_admin'],
+    permissions: [
+      'teachers.read',
+      'teachers.pii.read',
+      'teachers.manage',
+      'teachers.availability.manage',
+      'teachers.payrates.manage',
+      'finance.payouts.read',
+      'classes.sessions.read',
+      'classes.webinars.read',
+      'reports.read',
+    ],
+  },
+  {
+    slug: 'content_manager',
+    name: 'Content Manager',
+    description: 'Courses, lessons, study material, quizzes, and the AI tutor’s teaching setup.',
+    seats: '1 per language team',
+    legacy: ['curriculum_manager', 'course_manager', 'study_manager', 'quiz_manager', 'tech'],
+    permissions: [
+      'analytics.read',
+      'content.read',
+      'content.manage',
+      'content.publish',
+      'tutor.classes.read',
+      'tutor.config.read',
+      'tutor.config.manage',
+    ],
+  },
+  {
+    slug: 'b2b_manager',
+    name: 'B2B Account Manager',
+    description: 'Their institutional clients: batches, learners, NSDC, client reports.',
+    seats: 'one per account manager',
+    legacy: ['b_to_b_sales_manager', 'project_manager'],
+    permissions: [
+      'analytics.read',
+      'b2b.clients.read',
+      'b2b.clients.manage',
+      'b2b.nsdc.manage',
+      'classes.webinars.read',
+      'learners.read',
+      'reports.read',
+    ],
+  },
+  {
+    slug: 'marketing',
+    name: 'Marketing',
+    description: 'Blogs, website content, banners, and campaign notifications.',
+    seats: '1–3',
+    legacy: ['marketing', 'notification_admin', 'wp_manager', 'blogs_agent', 'offline_pages_agent'],
+    permissions: [
+      'analytics.read',
+      'marketing.blogs.manage',
+      'marketing.site.manage',
+      'marketing.notifications.send',
+      'content.read',
+      'reports.read',
+    ],
+  },
+  {
+    slug: 'privacy_officer',
+    name: 'Privacy Officer',
+    description:
+      'Handles DPDP data requests (access, erasure) and reviews the audit log. Can see PII.',
+    seats: '1 (a deputy optional)',
+    legacy: [],
+    permissions: [
+      'learners.read',
+      'learners.pii.read',
+      'learners.export',
+      'tutor.classes.read',
+      'tutor.transcripts.read',
+      'tutor.memory.read',
+      'tutor.memory.erase',
+      'console.audit.read',
+      'console.staff.read',
+      'console.roles.read',
+    ],
+  },
+  {
+    slug: 'auditor',
+    name: 'Auditor (read-only)',
+    description:
+      'Founders, investors’ auditors, analysts: sees everything non-personal, changes nothing.',
+    seats: 'as needed, time-boxed',
+    legacy: [],
+    permissions: [
+      'analytics.read',
+      'analytics.cost.read',
+      'tutor.access.read',
+      'overview.dashboard.read',
+      ...TUTOR_READ,
+      'tutor.config.read',
+      'learners.read',
+      'crm.leads.read',
+      'sales.bookings.read',
+      'finance.payments.read',
+      'finance.payouts.read',
+      'teachers.read',
+      'classes.sessions.read',
+      'classes.webinars.read',
+      'content.read',
+      'b2b.clients.read',
+      'reports.read',
+      'console.staff.read',
+      'console.roles.read',
+      'console.audit.read',
+      'system.health.read',
+    ],
+  },
+]
+
+export const SUPER_ADMIN = 'super_admin'
