@@ -164,8 +164,9 @@ they hold themselves.
 
 - **Super Admins: at least 2, no upper limit.** One is a single point of failure (holiday,
   lost phone); add more as the owners decide, and review the list quarterly, since every
-  Super Admin can change anyone's access. Bootstrap the first from the CLI; the first adds
-  the second directly; from then on a new Super Admin needs another Super Admin's approval.
+  Super Admin can change anyone's access. Bootstrap the first from the CLI; after that any
+  one Super Admin can make someone else a Super Admin directly (the owners chose this over a
+  second approval, 2026-10-24); every grant is in the audit log.
 - **Platform Admins: 1–2** (the COO/head of ops), not "everyone senior".
 - Everyone else: one account per person, the narrowest role that fits the job. **No shared
   logins**, ever, because the audit log is only as good as the identities in it.
@@ -216,8 +217,8 @@ re-read on every request, so a role change applies at once.
 
 - Invite-only accounts; one-time setup link (48 h, hashed in DB) where the person chooses
   their own password. No admin ever knows anyone's password. The link can be emailed by the
-  console or shared by the inviter (copy, WhatsApp, email, QR code). A Super Admin can invite
-  another Super Admin; while one other Super Admin exists, that role waits for their approval.
+  console or shared by the inviter (copy, WhatsApp, email, QR code). Any Super Admin can
+  invite another Super Admin and share the link; the role is granted at once.
 - Second sign-in step, chosen in **Security policy** (applies to everyone):
   - **Email code** (default): a 6-digit code sent over SMTP (Gmail App Password works),
     valid 10 minutes, single use, 5 tries, at most 5 codes per sign-in with a 30 s gap;

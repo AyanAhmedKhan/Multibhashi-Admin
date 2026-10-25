@@ -477,7 +477,7 @@ test.group('Console end to end', (group) => {
     }
   }).timeout(90_000)
 
-  test('a Super Admin invites a Super Admin; links can be reissued; others cannot', async ({ client, assert }) => {
+  test('any one Super Admin makes a Super Admin directly (invite or roles); links can be reissued; others cannot', async ({ client, assert }) => {
     const a = await invitedUser('sa-one@test.local', 'super_admin')
     await completeSetup(client, a.token)
     const sa = await signIn(client, 'sa-one@test.local', a.user.id)
@@ -485,7 +485,7 @@ test.group('Console end to end', (group) => {
     const superRole = roles.find((r) => r.slug === 'super_admin')!
     const support = roles.find((r) => r.slug === 'support_agent')!
 
-    // Another active Super Admin exists locally, so the new one waits for a second approval
+    // Other active Super Admins exist locally; still no second approval: granted at once
     const invite = await as(client, sa, 'post', '/api/staff').json({
       email: 'sa-two@test.local',
       name: 'Second Owner',
@@ -494,19 +494,12 @@ test.group('Console end to end', (group) => {
     })
     invite.assertStatus(200)
     assert.include(invite.body().setupLink, '/setup/')
-    const others = await db
-      .from('console_user_roles as ur')
-      .join('console_users as u', 'u.id', 'ur.user_id')
-      .where('ur.role_id', superRole.id)
-      .where('u.status', 'active')
-      .whereNot('u.id', a.user.id)
-      .count('* as total')
-    if (Number(others[0].total) > 0) {
-      assert.equal(invite.body().superAdmin, 'pending_approval')
-      assert.isNumber(invite.body().approvalId)
-    } else {
-      assert.equal(invite.body().superAdmin, 'granted')
-    }
+    assert.equal(invite.body().superAdmin, 'granted')
+    assert.isNull(invite.body().approvalId)
+    const hasSuperAdmin = async (userId: number) =>
+      !!(await db.from('console_user_roles').where({ user_id: userId, role_id: superRole.id }).first())
+    assert.isTrue(await hasSuperAdmin(invite.body().user.id))
+    assert.isNull(await db.from('console_approval_requests').where('requested_by', a.user.id).first())
 
     // Reissue: the old link stops working, the new one works
     const oldToken = String(invite.body().setupLink).split('/setup/')[1]
@@ -528,6 +521,16 @@ test.group('Console end to end', (group) => {
       reason: 'should not work (test)',
     })
     denied.assertStatus(403)
+
+    // …and a Super Admin promotes an existing staff member directly
+    const promoted = await as(client, sa, 'put', `/api/staff/${pa.user.id}/roles`).json({
+      roles: [superRole.id],
+      reason: 'Head of ops becomes a Super Admin (test)',
+    })
+    promoted.assertStatus(200)
+    assert.equal(promoted.body().status, 'done')
+    assert.isTrue(await hasSuperAdmin(pa.user.id))
+    assert.isNull(await db.from('console_approval_requests').where('requested_by', a.user.id).first())
   }).timeout(60_000)
 
   test('email sign-in codes (default) and password-only sign-in', async ({ client, assert }) => {

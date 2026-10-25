@@ -69,12 +69,11 @@ export function StaffMemberPage() {
   const saveRoles = () =>
     ask({
       title: 'Change roles',
-      description: 'Takes effect on their next request. Adding Super Admin creates an approval request for another Super Admin.',
+      description: 'Takes effect on their next request. Adding Super Admin takes effect right away (it is in the audit log).',
       confirmLabel: 'Save roles',
       run: async (reason) => {
-        const res = await api.put<{ status: string; approvalId?: number }>(`staff/${s.id}/roles`, { roles: picked, reason })
-        if (res.status === 'pending_approval') toast.info(`Approval request #${res.approvalId} created: another Super Admin must approve.`)
-        else toast.success('Roles saved')
+        await api.put<{ status: string }>(`staff/${s.id}/roles`, { roles: picked, reason })
+        toast.success('Roles saved')
         await reload()
       },
     })

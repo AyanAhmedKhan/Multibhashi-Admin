@@ -6,7 +6,6 @@ import consoleConfig from '#config/console'
 import auditService from '#services/audit_service'
 import rbacService from '#services/rbac_service'
 import sessionService from '#services/session_service'
-import approvalService from '#services/approval_service'
 import { SUPER_ADMIN } from '#rbac/roles'
 import { randomToken, sha256 } from '#helpers/tokens'
 import mailService, { simpleHtml } from '#services/mail_service'
@@ -112,13 +111,11 @@ class StaffService {
     const roles = await rbacService.rolesByIds(input.roleIds)
     if (!roles.length) throw new ApiException(422, 'Give the new staff member at least one role')
     // Only someone holding every permission of the roles can hand them out, so only a
-    // Super Admin can invite a Super Admin.
+    // Super Admin can invite a Super Admin. Any one Super Admin may: no second approval
+    // (the owners' decision, 2026-10-24); the grant is in the audit log.
     rbacService.assertCanGrant(actor.permissions, await rbacService.grantsOf(roles.map((r) => r.id)))
-    // Four eyes once there is a second pair: with another active Super Admin, the new one
-    // starts without the role and an approval request adds it; as the only one, it's direct.
     const wantsSuperAdmin = roles.some((r) => r.slug === SUPER_ADMIN)
-    const needsApproval = wantsSuperAdmin && (await db.transaction((trx) => rbacService.otherActiveSuperAdmins(actor.user.id, trx))) > 0
-    const assigned = needsApproval ? roles.filter((r) => r.slug !== SUPER_ADMIN) : roles
+    const assigned = roles
 
     const token = randomToken()
     const user = await db.transaction(async (trx) => {
@@ -150,30 +147,20 @@ class StaffService {
           targetType: 'staff',
           targetId: created.id,
           reason: input.reason,
-          metadata: { email, name, roles: assigned.map((r) => r.slug), ...(needsApproval ? { super_admin: 'pending_approval' } : {}) },
+          metadata: { email, name, roles: assigned.map((r) => r.slug), ...(wantsSuperAdmin ? { super_admin: 'granted' } : {}) },
         },
         trx
       )
       return created
     })
-    let approvalId: number | null = null
-    if (needsApproval) {
-      const request = await approvalService.request(actor, {
-        action: 'console.roles.assign',
-        payload: { user_id: user.id, role_ids: roles.map((r) => r.id) },
-        summary: `Make ${user.name} (${user.email}) a Super Admin (new invite)`,
-        reason: input.reason,
-      })
-      approvalId = request.id
-    }
     const delivery = input.sendEmail ? await emailInvite(user, setupLink(token), actor.user.name) : { emailed: false, emailError: null }
     return {
       ...delivery,
       user: this.view(user),
       setupLink: setupLink(token),
       expiresAt: user.setupExpiresAt,
-      superAdmin: wantsSuperAdmin ? (needsApproval ? 'pending_approval' : 'granted') : null,
-      approvalId,
+      superAdmin: wantsSuperAdmin ? 'granted' : null,
+      approvalId: null,
     }
   }
 
@@ -215,9 +202,9 @@ class StaffService {
 
   /**
    * Replaces a staff member's roles. Rules: nobody changes their own roles; the actor
-   * must hold every permission of the roles added AND removed; the last active super
-   * admin keeps the role; making someone super admin waits for another super admin
-   * (except while the actor is the only one: then nobody else could approve).
+   * must hold every permission of the roles added AND removed (so only a Super Admin
+   * makes someone a Super Admin, directly, without a second approval); the last active
+   * super admin keeps the role.
    */
   async setRoles(actor: Actor, id: number, roleIds: number[], reason: string) {
     if (id === actor.user.id) throw new ApiException(403, 'You can’t change your own roles.', 'SELF')
@@ -231,21 +218,6 @@ class StaffService {
       actor.permissions,
       await rbacService.grantsOf([...added, ...removed].map((r) => r.id))
     )
-
-    if (added.some((r) => r.slug === SUPER_ADMIN)) {
-      // Four eyes needs a second pair: the only active super admin adds the second one
-      // directly (audited as such); from then on another super admin must approve.
-      const others = await db.transaction((trx) => rbacService.otherActiveSuperAdmins(actor.user.id, trx))
-      if (others > 0) {
-        const request = await approvalService.request(actor, {
-          action: 'console.roles.assign',
-          payload: { user_id: user.id, role_ids: next.map((r) => r.id) },
-          summary: `Make ${user.name} (${user.email}) a Super Admin`,
-          reason,
-        })
-        return { status: 'pending_approval' as const, approvalId: request.id }
-      }
-    }
     await db.transaction((trx) => this.applyRoles(actor, user.id, next.map((r) => r.id), reason, trx))
     return { status: 'done' as const }
   }

@@ -39,7 +39,7 @@ export interface Invite {
   name: string
   email: string
   expiresAt?: string | null
-  superAdmin?: 'granted' | 'pending_approval' | null
+  superAdmin?: 'granted' | null
   emailed?: boolean
   emailError?: string | null
 }

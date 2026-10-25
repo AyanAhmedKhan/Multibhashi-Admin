@@ -4,7 +4,7 @@ import type { CommandOptions } from '@adonisjs/core/types/ace'
 /**
  * Creates the first Super Admin (an invite: they set their own password and MFA from
  * the printed link). Refuses once an active Super Admin exists: from then on, staff are
- * invited from the console, where it is audited and needs approval.
+ * invited from the console, where every invite and role change is audited.
  */
 export default class ConsoleBootstrap extends BaseCommand {
   static commandName = 'console:bootstrap'

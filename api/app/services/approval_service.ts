@@ -42,6 +42,8 @@ const ACTIONS: Record<string, ActionDef> = {
       return aiProService.apply(approver, parseAiProInput(request.payload), request.requestReason, trx, request.id)
     },
   },
+  // No longer raised (any one Super Admin now grants Super Admin directly, 2026-10-24);
+  // kept so requests created before can still be approved or rejected.
   'console.roles.assign': {
     permissions: ['console.staff.manage'],
     role: SUPER_ADMIN,

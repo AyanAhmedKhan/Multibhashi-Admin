@@ -22,7 +22,7 @@ export function ShareInvite({
   name: string
   email: string
   expiresAt?: string | null
-  superAdmin?: 'granted' | 'pending_approval' | null
+  superAdmin?: 'granted' | null
   emailed?: boolean
   emailError?: string | null
 }) {
@@ -58,11 +58,6 @@ export function ShareInvite({
       )}
       {emailError && <p className="rounded-lg bg-warning-soft px-3 py-2 text-sm text-warning">The email didn’t go out ({emailError}). Share the link below instead.</p>}
       {superAdmin === 'granted' && <Badge tone="violet">Super Admin</Badge>}
-      {superAdmin === 'pending_approval' && (
-        <p className="rounded-lg bg-warning-soft px-3 py-2 text-sm text-warning">
-          Super Admin waits for another Super Admin’s approval (Approvals page). Until then {first} signs in with the other roles.
-        </p>
-      )}
       <div className="flex gap-2">
         <Input readOnly value={link} onFocus={(e) => e.currentTarget.select()} aria-label="Invite link" className="font-mono text-xs" />
         <Button onClick={copy} icon={copied ? <Check /> : <Copy />} aria-label="Copy link">
