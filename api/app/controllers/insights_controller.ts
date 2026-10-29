@@ -6,6 +6,7 @@ import { DEFAULT_COST_MODEL, costModelStore, perMinuteInr, validateCostModel } f
 import auditService from '#services/audit_service'
 import providerSync from '#services/analytics/provider_sync'
 import quizAnalytics from '#services/analytics/quiz_analytics'
+import quizCost from '#services/analytics/quiz_cost'
 import { costModelValidator, invoiceValidator, listValidator, providerRefreshValidator } from '#validators/console'
 
 /** Insights: users, engagement, AI tutor usage, cost. Aggregates only. */
@@ -58,6 +59,11 @@ export default class InsightsController {
     return costService.reconciliation(6)
   }
 
+  /** Quiz AI cost: actual provider spend per day, allocated per answer; estimates labelled. */
+  async quizCost({ request }: HttpContext) {
+    return quizCost.cost(await this.days(request))
+  }
+
   /** Provider connection and freshness for the Quizzes cost section. */
   async quizProviders() {
     return providerSync.status()
@@ -80,6 +86,7 @@ export default class InsightsController {
       outcome: failed ? 'failure' : 'success',
       metadata: { days: result.days, openai: summary(result.openai), google: summary(result.google) },
     })
+    quizCost.clearCache()
     return { result, status: await providerSync.status() }
   }
 

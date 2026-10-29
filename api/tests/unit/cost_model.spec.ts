@@ -116,6 +116,40 @@ test.group('Cost model', () => {
     assert.throws(() => validateCostModel(zeroPer))
   })
 
+  test('quiz prices (checked 29 Oct 2026): gpt-4o-mini marking and Google speech-to-text, standard list prices', ({ assert }) => {
+    const m = clone()
+    const usd = (provider: string, model: string, unit: string, qty: number) => (unitPriceInr(priceFor(m, provider, model, unit, '2026-10-29')!, m.usdToInr) * qty) / m.usdToInr
+    assert.closeTo(usd('openai', 'gpt-4o-mini', 'input_tokens', 1_000_000), 0.15, 1e-12)
+    assert.closeTo(usd('openai', 'gpt-4o-mini', 'cached_input_tokens', 1_000_000), 0.075, 1e-12)
+    assert.closeTo(usd('openai', 'gpt-4o-mini', 'output_tokens', 1_000_000), 0.6, 1e-12)
+    assert.closeTo(usd('google', 'speech-v2-standard', 'audio_seconds', 60), 0.016, 1e-12)
+    assert.closeTo(usd('google', 'speech-v1-standard', 'audio_seconds', 60), 0.024, 1e-12)
+    for (const id of ['quiz-openai-in', 'quiz-openai-cached', 'quiz-openai-out', 'quiz-stt-v2', 'quiz-stt-v1']) {
+      const line = m.prices.find((p) => p.id === id)!
+      assert.exists(line, id)
+      assert.isUndefined(line.from, `${id} applies since always`)
+      assert.equal(line.currency, 'USD')
+    }
+    // Own keys: nothing of the tutor's matches them, and they don't price the tutor's usage
+    assert.isNull(priceFor(m, 'google', 'gemini-3.1-flash-lite', 'audio_seconds'))
+    assert.isNull(priceFor(m, 'openai', 'gpt-4o', 'input_tokens'), 'gpt-4o is not priced as gpt-4o-mini')
+    assert.equal(priceFor(m, 'google', 'gemini-3.1-flash-lite', 'input_tokens')?.id, 'llm-in')
+  })
+
+  test('a price list saved before the quiz lines gets them merged in (no migration)', ({ assert }) => {
+    const old = clone()
+    old.prices = old.prices.filter((p) => !p.id.startsWith('quiz-'))
+    const merged = withNewDefaults(old)
+    assert.equal(priceFor(merged, 'openai', 'gpt-4o-mini', 'output_tokens')?.id, 'quiz-openai-out')
+    assert.equal(priceFor(merged, 'google', 'speech-v2-standard', 'audio_seconds')?.id, 'quiz-stt-v2')
+    assert.doesNotThrow(() => validateCostModel(merged))
+    // Finance's own price for the same key wins over the default
+    const own = clone()
+    own.prices = own.prices.filter((p) => p.id !== 'quiz-openai-out')
+    own.prices.push({ id: 'finance-mini-out', label: 'Negotiated', provider: 'openai', model: 'gpt-4o-mini', unit: 'output_tokens', price: 0.5, currency: 'USD', per: 1_000_000 })
+    assert.equal(priceFor(withNewDefaults(own), 'openai', 'gpt-4o-mini', 'output_tokens')?.id, 'finance-mini-out')
+  })
+
   test('engine estimate from the taught language', ({ assert }) => {
     assert.equal(estimateEngine('kn-IN', 'sarvam'), 'sarvam')
     assert.equal(estimateEngine('es-ES', 'sarvam'), 'global')

@@ -57,6 +57,8 @@ const SARVAM_V4 = 'https://www.sarvam.ai/blogs/bulbul-v4-flash/'
 const LIVEKIT = 'https://livekit.com/pricing'
 const GEMINI = 'https://ai.google.dev/gemini-api/docs/pricing'
 const REALTIME_MODEL = 'gemini-2.5-flash-native-audio-preview-12-2025'
+const OPENAI = 'https://developers.openai.com/api/docs/pricing'
+const GOOGLE_STT = 'https://cloud.google.com/speech-to-text/pricing'
 /** Prices checked against the providers' pages on this day; USD at the Wise mid-market rate. */
 const CHECKED_ON = '2026-10-29'
 
@@ -106,6 +108,13 @@ export const DEFAULT_COST_MODEL: CostModel = {
     { id: 'mem-cached', label: 'Memory model (Gemini 3.5 Flash) cached input', provider: 'google', model: 'gemini-3.5-flash', unit: 'cached_input_tokens', price: 0.15, currency: 'USD', per: 1_000_000, source: GEMINI, note: MEM_UNVERIFIED },
     { id: 'mem-out', label: 'Memory model (Gemini 3.5 Flash) output', provider: 'google', model: 'gemini-3.5-flash', unit: 'output_tokens', price: 9, currency: 'USD', per: 1_000_000, source: GEMINI, note: MEM_UNVERIFIED },
     { id: 'livekit', label: 'LiveKit WebRTC minutes', provider: 'livekit', model: '*', unit: 'participant_seconds', price: 0.0005, currency: 'USD', per: 60, source: LIVEKIT, note: 'Ship plan overage ($0.0004 on Scale); set 0 while inside the plan’s included minutes. Agent session minutes ($0.01) apply only to agents hosted on LiveKit Cloud; ours runs on our own server' },
+    // Quizzes (docs/QUIZ_OBSERVABILITY.md §4): marking on OpenAI, Speaking answers' speech-to-text on Google.
+    // Used for the estimate when a day has no provider data, and to weigh a day's actual bill across answers.
+    { id: 'quiz-openai-in', label: 'Quiz marking: gpt-4o-mini input', provider: 'openai', model: 'gpt-4o-mini', unit: 'input_tokens', price: 0.15, currency: 'USD', per: 1_000_000, source: OPENAI, note: 'Standard tier (not Batch). Snapshots such as gpt-4o-mini-2024-07-18 are priced on this line' },
+    { id: 'quiz-openai-cached', label: 'Quiz marking: gpt-4o-mini cached input', provider: 'openai', model: 'gpt-4o-mini', unit: 'cached_input_tokens', price: 0.075, currency: 'USD', per: 1_000_000, source: OPENAI },
+    { id: 'quiz-openai-out', label: 'Quiz marking: gpt-4o-mini output', provider: 'openai', model: 'gpt-4o-mini', unit: 'output_tokens', price: 0.6, currency: 'USD', per: 1_000_000, source: OPENAI },
+    { id: 'quiz-stt-v2', label: 'Quiz speech-to-text: Google V2 standard', provider: 'google', model: 'speech-v2-standard', unit: 'audio_seconds', price: 0.016, currency: 'USD', per: 60, source: GOOGLE_STT, note: '$0.016 per minute for the first 500,000 minutes a month (lower tiers above), each request rounded up to the second. The quiz backend’s default' },
+    { id: 'quiz-stt-v1', label: 'Quiz speech-to-text: Google V1 standard', provider: 'google', model: 'speech-v1-standard', unit: 'audio_seconds', price: 0.024, currency: 'USD', per: 60, source: GOOGLE_STT, note: 'V1 fallback, without data logging: $0.024 per minute after the first 60 free minutes a month; each request rounded up to the second' },
   ],
   assumptions: {
     sarvam: {

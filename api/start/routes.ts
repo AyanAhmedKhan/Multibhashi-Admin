@@ -129,6 +129,7 @@ router
         router.get('insights/cost', [InsightsController, 'cost']).use(middleware.can(['analytics.cost.read']))
         router.get('insights/cost-model', [InsightsController, 'costModel']).use(middleware.can(['analytics.cost.read']))
         router.get('insights/reconciliation', [InsightsController, 'reconciliation']).use(middleware.can(['analytics.cost.read']))
+        router.get('insights/quiz-cost', [InsightsController, 'quizCost']).use(middleware.can(['analytics.cost.read']))
         router.get('insights/quiz-providers', [InsightsController, 'quizProviders']).use(middleware.can(['analytics.cost.read']))
         // Calls OpenAI / BigQuery and rewrites the synced window: the Cost page's owner/finance permission.
         router

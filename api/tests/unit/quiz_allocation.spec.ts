@@ -10,6 +10,8 @@ import {
   type Rates,
 } from '#services/analytics/quiz_allocation'
 import { attemptsFrom, markingPath, sentencesFrom } from '#services/analytics/quiz_analytics'
+import { priceModelOf, providerActuals, ratesFor } from '#services/analytics/quiz_cost'
+import { DEFAULT_COST_MODEL } from '#services/analytics/cost_model'
 
 // gpt-4o-mini list prices and V2 speech at ₹95.2/$ (the rate card's figures)
 const RATES: Rates = {
@@ -147,5 +149,62 @@ test.group('Quiz cost allocation', () => {
     assert.equal(e.speechSeconds, 18) // 40 / 2.3 = 17.4 → 18 s
     assert.closeTo(e.speechInr, 18 * (0.016 / 60) * 95.2, 1e-12)
     assert.closeTo(e.markingInr, (600 * 0.15 + 150 * 0.6) / 1_000_000 * 95.2, 1e-12)
+  })
+})
+
+test.group('Quiz cost: which days the providers reported', () => {
+  const model = structuredClone(DEFAULT_COST_MODEL)
+  const row = (day: string, provider: string, source: string, item: string, unit: string, quantity: number, costUsd: number, scope = 'multibhashi-android-app') => ({
+    day,
+    provider,
+    scope,
+    item,
+    unit,
+    quantity,
+    costUsd,
+    source,
+  })
+  const rows = [
+    row('2026-10-27', 'google', 'gcp_billing_export', 'Speech / Recognition', 'seconds', 600, 0.16),
+    row('2026-10-27', 'google', 'gcp_billing_export', 'Storage / Standard Storage Mumbai', 'byte-seconds', 1e12, 5),
+    row('2026-10-27', 'google', 'gcp_billing_export', 'Speech / Recognition', 'seconds', 60, 1, 'some-other-project'),
+    row('2026-10-27', 'openai', 'openai_costs_api', 'gpt-4o-mini-2024-07-18, input', 'tokens', 100_000, 0.015, 'proj_q'),
+    row('2026-10-28', 'openai', 'openai_usage_api', 'gpt-4o-mini-2024-07-18', 'input_tokens', 1_000_000, 0, 'proj_q/key'),
+    row('2026-10-28', 'openai', 'openai_usage_api', 'gpt-4o-mini-2024-07-18', 'requests', 500, 0, 'proj_q/key'),
+    row('2026-10-28', 'openai', 'openai_usage_api', 'o9-preview', 'output_tokens', 10, 0, 'proj_q/key'),
+  ]
+  const coverage = {
+    google: { from: '2026-10-27', through: '2026-10-28T23:00:00.000Z' },
+    openai: { from: '2026-10-27', through: '2026-10-29T04:30:00.000Z' },
+  }
+
+  test('reported days are actual (zero if nothing billed); days before the first sync or not yet complete are left to the estimate', ({ assert }) => {
+    const reported = providerActuals(rows, model, coverage, 'multibhashi-android-app')
+    const a = reported.actualsFor(['2026-10-26', '2026-10-27', '2026-10-28', '2026-10-29'])
+    assert.isFalse(a.has('2026-10-26'), 'before the first synced day')
+    assert.closeTo(a.get('2026-10-27')!.speechInr!, 0.16 * model.usdToInr, 1e-9, 'speech SKUs of the speech project only')
+    assert.equal(a.get('2026-10-28')!.speechInr, 0, 'export complete past the day, no speech billed')
+    assert.isUndefined(a.get('2026-10-29')?.speechInr, 'export not through the 29th yet')
+    assert.equal(a.get('2026-10-27')!.markingBasis, 'actual')
+    assert.closeTo(a.get('2026-10-27')!.markingInr!, 0.015 * model.usdToInr, 1e-9)
+    // No Costs API row on the 28th: OpenAI's own token counts × list price (snapshot → model line)
+    assert.equal(a.get('2026-10-28')!.markingBasis, 'usage')
+    assert.closeTo(a.get('2026-10-28')!.markingInr!, 0.15 * model.usdToInr, 1e-9)
+    assert.isUndefined(a.get('2026-10-29')?.markingInr, 'OpenAI’s bucket for the 29th is still open')
+    assert.deepEqual(reported.unpriced, ['o9-preview output_tokens'])
+  })
+
+  test('not connected: no day is actual', ({ assert }) => {
+    const none = providerActuals([], model, { google: { from: null, through: null }, openai: { from: null, through: null } }, null)
+    assert.equal(none.actualsFor(['2026-10-28']).size, 0)
+  })
+
+  test('snapshot names price on the model line; rates come from the rate card', ({ assert }) => {
+    assert.equal(priceModelOf('gpt-4o-mini-2024-07-18'), 'gpt-4o-mini')
+    assert.equal(priceModelOf('gpt-4o-mini'), 'gpt-4o-mini')
+    const r = ratesFor(model, '2026-10-29')
+    assert.closeTo(r.speechPerSecondInr, (0.016 / 60) * model.usdToInr, 1e-12)
+    assert.closeTo(r.inputPerTokenInr, (0.15 / 1e6) * model.usdToInr, 1e-15)
+    assert.closeTo(r.outputPerTokenInr, (0.6 / 1e6) * model.usdToInr, 1e-15)
   })
 })
