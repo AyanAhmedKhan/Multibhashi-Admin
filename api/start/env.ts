@@ -64,6 +64,27 @@ const env = await Env.create(new URL('../', import.meta.url), {
   SMTP_USER: Env.schema.string.optional(),
   SMTP_PASSWORD: Env.schema.string.optional(),
   MAIL_FROM: Env.schema.string.optional(),
+
+  /*
+  |----------------------------------------------------------
+  | Quiz AI providers' own usage and billing (docs/QUIZ_OBSERVABILITY.md §3). All optional:
+  | without them the Quizzes cost section says "not connected" and shows estimates.
+  | Production values live only in deploy/.env.production on the server.
+  |----------------------------------------------------------
+  */
+  // An OpenAI organisation Admin key (Usage + Costs APIs), not a normal API key.
+  OPENAI_ADMIN_KEY: Env.schema.string.optional(),
+  // The quiz backend's OpenAI project id, and/or its API key ids (comma separated).
+  OPENAI_QUIZ_PROJECT_ID: Env.schema.string.optional(),
+  OPENAI_QUIZ_API_KEY_IDS: Env.schema.string.optional(),
+  // Service account (BigQuery Data Viewer on the export dataset + BigQuery Job User): the JSON
+  // itself (raw or base64) or a path to the key file.
+  GCP_BILLING_CREDENTIALS_JSON: Env.schema.string.optional(),
+  GCP_BILLING_CREDENTIALS_FILE: Env.schema.string.optional(),
+  // project.dataset.gcp_billing_export_v1_XXXXXX_XXXXXX_XXXXXX
+  GCP_BILLING_EXPORT_TABLE: Env.schema.string.optional(),
+  // The project speech-to-text is billed to (multibhashi-android-app).
+  GCP_SPEECH_PROJECT_ID: Env.schema.string.optional(),
 })
 
 if (env.get('NODE_ENV') === 'production') {

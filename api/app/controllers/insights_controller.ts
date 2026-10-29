@@ -4,7 +4,8 @@ import analyticsService from '#services/analytics/analytics_service'
 import costService from '#services/analytics/cost_service'
 import { DEFAULT_COST_MODEL, costModelStore, perMinuteInr, validateCostModel } from '#services/analytics/cost_model'
 import auditService from '#services/audit_service'
-import { costModelValidator, invoiceValidator, listValidator } from '#validators/console'
+import providerSync from '#services/analytics/provider_sync'
+import { costModelValidator, invoiceValidator, listValidator, providerRefreshValidator } from '#validators/console'
 
 /** Insights: users, engagement, AI tutor usage, cost. Aggregates only. */
 export default class InsightsController {
@@ -49,6 +50,31 @@ export default class InsightsController {
     const input = await request.validateUsing(invoiceValidator)
     await costService.saveInvoice(actor, { month: input.month, provider: input.provider, amountInr: input.amount_inr, note: input.note }, input.reason)
     return costService.reconciliation(6)
+  }
+
+  /** Provider connection and freshness for the Quizzes cost section. */
+  async quizProviders() {
+    return providerSync.status()
+  }
+
+  /**
+   * Refresh: pull the quiz providers' usage and billing now (the daily cron does the same).
+   * Not connected providers are skipped, never an error. Audited with what each returned.
+   */
+  async refreshQuizProviders({ request, actor }: HttpContext) {
+    const { days } = await request.validateUsing(providerRefreshValidator)
+    const result = await providerSync.run(days ?? 7)
+    const summary = (r: (typeof result)['openai'] | (typeof result)['google']) =>
+      'connected' in r ? { connected: false } : { connected: true, ok: r.ok, rows: r.rows, error: r.error ? r.error.slice(0, 200) : null }
+    const failed = [result.openai, result.google].some((r) => !('connected' in r) && !r.ok)
+    await auditService.record({
+      actor,
+      action: 'analytics.provider_usage.refreshed',
+      targetType: 'provider_usage',
+      outcome: failed ? 'failure' : 'success',
+      metadata: { days: result.days, openai: summary(result.openai), google: summary(result.google) },
+    })
+    return { result, status: await providerSync.status() }
   }
 
   async costModel() {

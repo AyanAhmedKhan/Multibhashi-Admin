@@ -50,6 +50,7 @@
   "dependencies": {
     "@adonisjs/core": "6.21.0",
     "@adonisjs/lucid": "21.8.2",
+    "@google-cloud/bigquery": "9.2.0",
     "@vinejs/vine": "3.0.1",
     "livekit-server-sdk": "2.15.4",
     "luxon": "3.7.2",
