@@ -8,8 +8,12 @@
     "quantity": 5400,
     "cost_usd": 1.44,
     "credits_usd": 0,
-    "usage_through": { "value": "2026-10-27T18:30:00.000Z" },
-    "exported_at": { "value": "2026-10-28T02:10:00.000Z" }
+    "usage_through": {
+      "value": "2026-10-27T18:30:00.000Z"
+    },
+    "exported_at": {
+      "value": "2026-10-28T02:10:00.000Z"
+    }
   },
   {
     "usage_day": "2026-10-27",
@@ -20,8 +24,12 @@
     "quantity": 600,
     "cost_usd": 0.24,
     "credits_usd": -0.04,
-    "usage_through": { "value": "2026-10-27T18:30:00.000Z" },
-    "exported_at": { "value": "2026-10-28T02:10:00.000Z" }
+    "usage_through": {
+      "value": "2026-10-27T18:30:00.000Z"
+    },
+    "exported_at": {
+      "value": "2026-10-28T02:10:00.000Z"
+    }
   },
   {
     "usage_day": "2026-10-28",
@@ -32,8 +40,12 @@
     "quantity": 3600,
     "cost_usd": 0.96,
     "credits_usd": 0,
-    "usage_through": { "value": "2026-10-28T23:00:00.000Z" },
-    "exported_at": { "value": "2026-10-29T03:40:00.000Z" }
+    "usage_through": {
+      "value": "2026-10-28T23:00:00.000Z"
+    },
+    "exported_at": {
+      "value": "2026-10-29T03:40:00.000Z"
+    }
   },
   {
     "usage_day": "2026-10-28",
@@ -41,10 +53,46 @@
     "service": "Storage service (fixture name)",
     "sku": "Standard Storage Mumbai",
     "unit": "byte-seconds",
-    "quantity": 1.5e15,
+    "quantity": 1500000000000000,
     "cost_usd": 0.31,
     "credits_usd": 0,
-    "usage_through": { "value": "2026-10-28T23:00:00.000Z" },
-    "exported_at": { "value": "2026-10-29T03:40:00.000Z" }
+    "usage_through": {
+      "value": "2026-10-28T23:00:00.000Z"
+    },
+    "exported_at": {
+      "value": "2026-10-29T03:40:00.000Z"
+    }
+  },
+  {
+    "usage_day": "2026-10-28",
+    "project_id": "multibhashi-web",
+    "service": "Compute service (fixture name)",
+    "sku": "N2 Instance Core running in Mumbai",
+    "unit": "seconds",
+    "quantity": 86400,
+    "cost_usd": 1.2,
+    "credits_usd": -0.3,
+    "usage_through": {
+      "value": "2026-10-28T23:00:00.000Z"
+    },
+    "exported_at": {
+      "value": "2026-10-29T03:40:00.000Z"
+    }
+  },
+  {
+    "usage_day": "2026-10-28",
+    "project_id": "no-project",
+    "service": "Invoice (fixture name)",
+    "sku": "Tax",
+    "unit": "",
+    "quantity": 0,
+    "cost_usd": 0.5,
+    "credits_usd": 0,
+    "usage_through": {
+      "value": "2026-10-28T23:00:00.000Z"
+    },
+    "exported_at": {
+      "value": "2026-10-29T03:40:00.000Z"
+    }
   }
 ]

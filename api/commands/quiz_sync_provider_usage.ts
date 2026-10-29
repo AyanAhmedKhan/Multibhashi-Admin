@@ -2,15 +2,16 @@ import { BaseCommand, flags } from '@adonisjs/core/ace'
 import type { CommandOptions } from '@adonisjs/core/types/ace'
 
 /**
- * Pulls the quiz AI providers' own daily usage and billing (OpenAI Usage + Costs APIs, the
- * GCP billing export) into console_ai_provider_daily. Idempotent: each run replaces its
+ * Pulls the providers' own daily usage and billing — the whole OpenAI organisation (Usage +
+ * Costs APIs) and the whole GCP billing account (billing export) — into
+ * console_ai_provider_daily; quiz/tutor attribution happens when reading. Idempotent: each run replaces its
  * window. Meant for a daily system cron, e.g. 03:15 IST:
  *   docker compose -f deploy/docker-compose.yml exec -T admin-api node ace quiz:sync-provider-usage --days 7
  * A provider without credentials is reported as "not connected" and skipped.
  */
 export default class QuizSyncProviderUsage extends BaseCommand {
   static commandName = 'quiz:sync-provider-usage'
-  static description = 'Sync OpenAI and GCP billing usage for quiz marking and speech-to-text (last N IST days)'
+  static description = 'Sync the whole OpenAI and GCP bill (usage, cost, credits) for the last N IST days'
   static options: CommandOptions = { startApp: true }
 
   @flags.number({ description: 'How many IST days back, today included (1–90)', default: 7 })

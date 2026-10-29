@@ -28,7 +28,8 @@ export default class extends BaseSchema {
       // input_tokens, cached_input_tokens, output_tokens, requests; the GCP usage unit; usd for a cost-only line
       table.string('unit', 48).notNullable()
       table.decimal('quantity', 20, 4).notNullable().defaultTo(0)
-      // The provider's own cost figure in USD (OpenAI Costs API; BigQuery cost + credits ÷ conversion rate)
+      // The provider's own gross cost in USD (OpenAI Costs API; BigQuery cost ÷ conversion rate);
+      // credits are kept apart in credits_usd (migration 1793000000010)
       table.decimal('cost_usd', 16, 6).notNullable().defaultTo(0)
       // openai_usage_api | openai_costs_api | gcp_billing_export
       table.string('source', 32).notNullable()

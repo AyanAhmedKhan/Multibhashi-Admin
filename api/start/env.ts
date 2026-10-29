@@ -67,14 +67,16 @@ const env = await Env.create(new URL('../', import.meta.url), {
 
   /*
   |----------------------------------------------------------
-  | Quiz AI providers' own usage and billing (docs/QUIZ_OBSERVABILITY.md §3). All optional:
-  | without them the Quizzes cost section says "not connected" and shows estimates.
+  | The providers' own usage and billing (docs/QUIZ_OBSERVABILITY.md §3): the WHOLE OpenAI
+  | organisation and GCP billing account are synced; the quiz ids below only attribute part of
+  | it to the quizzes when reading. All optional: without them the Cost page says "not
+  | connected" and the quiz figures are estimates.
   | Production values live only in deploy/.env.production on the server.
   |----------------------------------------------------------
   */
   // An OpenAI organisation Admin key (Usage + Costs APIs), not a normal API key.
   OPENAI_ADMIN_KEY: Env.schema.string.optional(),
-  // The quiz backend's OpenAI project id, and/or its API key ids (comma separated).
+  // Attribution: the quiz backend's OpenAI project id and/or API key ids (comma separated).
   OPENAI_QUIZ_PROJECT_ID: Env.schema.string.optional(),
   OPENAI_QUIZ_API_KEY_IDS: Env.schema.string.optional(),
   // Service account (BigQuery Data Viewer on the export dataset + BigQuery Job User): the JSON
@@ -83,7 +85,7 @@ const env = await Env.create(new URL('../', import.meta.url), {
   GCP_BILLING_CREDENTIALS_FILE: Env.schema.string.optional(),
   // project.dataset.gcp_billing_export_v1_XXXXXX_XXXXXX_XXXXXX
   GCP_BILLING_EXPORT_TABLE: Env.schema.string.optional(),
-  // The project speech-to-text is billed to (multibhashi-android-app).
+  // Attribution: the project quiz speech-to-text is billed to (multibhashi-android-app).
   GCP_SPEECH_PROJECT_ID: Env.schema.string.optional(),
 })
 

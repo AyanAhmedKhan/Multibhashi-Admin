@@ -77,10 +77,11 @@ test.group('OpenAI Usage and Costs APIs', () => {
     assert.deepEqual(first.searchParams.getAll('project_ids[]'), ['proj_quizbackend'])
     assert.deepEqual(first.searchParams.getAll('api_key_ids[]'), ['key_quizserver'])
     assert.equal(new URL(calls[1].split(' ')[0]).searchParams.get('page'), 'page_AAAAAGdGxdEiJdKOAAAAAGcqsYA=')
-    assert.deepEqual(new URL(calls[2].split(' ')[0]).searchParams.getAll('group_by[]'), ['project_id', 'line_item'])
     assert.isTrue(calls.every((c) => c.endsWith('Bearer sk-admin-test')))
     assert.isAbove(usage.length, 4)
-    assert.lengthOf(costs, 4)
+    assert.lengthOf(costs.rows, 4)
+    assert.isTrue(costs.byKey)
+    assert.deepEqual(new URL(calls[2].split(' ')[0]).searchParams.getAll('group_by[]'), ['project_id', 'line_item', 'api_key_id'])
   })
 
   test('a rejected key is a ProviderError that never echoes the key', async ({ assert }) => {
@@ -98,11 +99,14 @@ test.group('OpenAI Usage and Costs APIs', () => {
 })
 
 test.group('GCP billing export', () => {
-  test('rows: IST day, service / SKU, net cost in USD, and how far the export has got', async ({ assert }) => {
+  test('rows: every project, IST day, service / SKU, gross and credits apart, and how far the export has got', async ({ assert }) => {
     const { rows, dataThrough, exportedAt } = parseBillingRows(await fixture('gcp_billing_rows.json'))
-    assert.lengthOf(rows, 4)
+    assert.lengthOf(rows, 6)
     const v1 = rows.find((r) => r.item.endsWith('Speech Recognition (without data logging)'))!
-    assert.closeTo(v1.costUsd, 0.2, 1e-9, 'cost + credits')
+    assert.closeTo(v1.costUsd, 0.24, 1e-9, 'gross')
+    assert.closeTo(v1.creditsUsd, -0.04, 1e-9, 'credits kept apart: net = gross + credits')
+    assert.deepEqual([...new Set(rows.map((r) => r.scope))].sort(), ['multibhashi-android-app', 'multibhashi-web', 'no-project'])
+    assert.equal(rows.find((r) => r.scope === 'no-project')?.unit, 'none')
     assert.equal(v1.unit, 'seconds')
     assert.equal(v1.scope, 'multibhashi-android-app')
     assert.equal(v1.source, 'gcp_billing_export')
@@ -118,14 +122,13 @@ test.group('GCP billing export', () => {
     assert.isFalse(isSpeechSku('Recognition API / Network egress'), 'the service part is ignored')
   })
 
-  test('the table id is validated before it reaches SQL; the project and day are parameters', async ({ assert }) => {
+  test('the table id is validated before it reaches SQL; the whole account is read (only the day is a parameter)', async ({ assert }) => {
     assert.isTrue(validTable('mb-billing.billing_export.gcp_billing_export_v1_016513_594D05_0EF1D5'))
     assert.isFalse(validTable('x`; DROP TABLE y; --'))
     assert.throws(() => billingQuery('not a table'))
     let seen: { query: string; params?: Record<string, unknown> } | null = null
     const reader = new BillingReader({
       table: 'mb-billing.billing_export.gcp_billing_export_v1_016513_594D05_0EF1D5',
-      projectId: 'multibhashi-android-app',
       client: {
         query: async (options) => {
           seen = options
@@ -134,8 +137,10 @@ test.group('GCP billing export', () => {
       },
     })
     const result = await reader.read('2026-10-23')
-    assert.lengthOf(result.rows, 4)
-    assert.deepEqual(seen!.params, { project: 'multibhashi-android-app', since_day: '2026-10-23' })
+    assert.lengthOf(result.rows, 6)
+    assert.deepEqual(seen!.params, { since_day: '2026-10-23' })
+    assert.notInclude(seen!.query, '@project', 'no project filter: the whole billing account')
+    assert.include(seen!.query, "IFNULL(project.id, 'no-project')")
     assert.include(seen!.query, '`mb-billing.billing_export.gcp_billing_export_v1_016513_594D05_0EF1D5`')
     assert.include(seen!.query, 'UNNEST(credits)')
     assert.include(seen!.query, "DATE(usage_start_time, 'Asia/Kolkata')")
@@ -144,7 +149,6 @@ test.group('GCP billing export', () => {
   test('a BigQuery failure becomes a ProviderError', async ({ assert }) => {
     const reader = new BillingReader({
       table: 'a-proj.ds.gcp_billing_export_v1_X',
-      projectId: 'multibhashi-android-app',
       client: { query: async () => Promise.reject(Object.assign(new Error('Access Denied: Table a-proj:ds.t'), { code: 403 })) },
     })
     await assert.rejects(() => reader.read('2026-10-23'), /BigQuery: Access Denied/)
@@ -157,7 +161,7 @@ test.group('Provider configuration', () => {
     assert.isFalse(cfg.openai.connected)
     assert.deepEqual(cfg.openai.missing, ['OPENAI_ADMIN_KEY'])
     assert.isFalse(cfg.google.connected)
-    assert.lengthOf(cfg.google.missing, 3)
+    assert.lengthOf(cfg.google.missing, 2, 'GCP_SPEECH_PROJECT_ID is an attribution rule, not needed to connect')
   })
 
   test('filters and credentials parse (raw or base64 JSON); a bad table is a problem, not a crash', async ({ assert }) => {

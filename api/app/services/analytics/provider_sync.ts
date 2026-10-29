@@ -5,10 +5,13 @@ import { istDayLabel, istDayOf } from '#helpers/ist'
 import { OpenAiUsageClient, type FetchLike } from '#services/analytics/openai_usage'
 import { BillingReader, bigQueryClient, validTable, type BigQueryLike } from '#services/analytics/gcp_billing'
 import { ProviderError, type ProviderRow } from '#services/analytics/provider_types'
+import { TUTOR_GEMINI_PROJECT, describeRules, type AttributionRules } from '#services/analytics/cost_attribution'
 
 /**
- * Pulls the quiz AI providers' own daily usage and billing into console_ai_provider_daily
- * (docs/QUIZ_OBSERVABILITY.md §3). Run daily by `quiz:sync-provider-usage --days N` (system
+ * Pulls the providers' own daily usage and billing into console_ai_provider_daily
+ * (docs/QUIZ_OBSERVABILITY.md §3): the WHOLE bill, unfiltered — every OpenAI project, key and
+ * model, every GCP project, service and SKU on the billing account. What is quizzes, AI tutor
+ * or anything else is decided at read time (cost_attribution.ts). Run daily by `quiz:sync-provider-usage --days N` (system
  * cron) and by the Cost page's Refresh. Each successful fetch REPLACES its window for that
  * source in one transaction (upsert on the unique key, rows the provider no longer reports
  * removed), so re-running is idempotent. A provider without credentials is "not connected":
@@ -28,7 +31,9 @@ export interface GoogleCredentials {
 }
 
 export interface ProviderConfig {
+  /** projectIds / apiKeyIds: the quiz backend's, an attribution rule (not a sync filter). */
   openai: { connected: boolean; missing: string[]; adminKey?: string; projectIds: string[]; apiKeyIds: string[] }
+  /** projectId: the speech-to-text project, an attribution rule (not a sync filter). */
   google: { connected: boolean; missing: string[]; problem?: string; table?: string; projectId?: string; credentials?: GoogleCredentials }
 }
 
@@ -43,6 +48,8 @@ export interface ProviderRunStatus {
   exportedAt?: string | null
   /** Rows written by console:seed-demo (local only), not by a provider. */
   demo?: boolean
+  /** OpenAI: whether the Costs API accepted grouping by API key (else per project only). */
+  costsByKey?: boolean
 }
 
 export type SyncStatus = Partial<Record<'openai' | 'google', ProviderRunStatus>>
@@ -87,11 +94,21 @@ export async function readProviderConfig(get: Get = (k) => env.get(k as never) a
   const table = get('GCP_BILLING_EXPORT_TABLE')
   if (!table) missing.push('GCP_BILLING_EXPORT_TABLE')
   else if (!validTable(table)) problem = problem ?? 'GCP_BILLING_EXPORT_TABLE must be project.dataset.gcp_billing_export_v1_…'
+  // Attribution only: not needed to connect
   const projectId = get('GCP_SPEECH_PROJECT_ID')
-  if (!projectId) missing.push('GCP_SPEECH_PROJECT_ID')
   return {
     openai,
     google: { connected: !missing.length && !problem, missing, problem, table, projectId, credentials },
+  }
+}
+
+/** The read-time attribution rules from the configuration. */
+export function rulesFrom(config: ProviderConfig): AttributionRules {
+  return {
+    speechProject: config.google.projectId ?? null,
+    openaiQuizProjects: config.openai.projectIds,
+    openaiQuizKeys: config.openai.apiKeyIds,
+    tutorGcpProjects: [TUTOR_GEMINI_PROJECT],
   }
 }
 
@@ -142,11 +159,14 @@ class ProviderSync {
       .groupBy('provider')
       .select('provider', db.raw('DATE_FORMAT(MIN(day), "%Y-%m-%d") as earliest'), db.raw('DATE_FORMAT(MAX(day), "%Y-%m-%d") as latest'))
     const span = (p: string) => spans.find((s) => s.provider === p)
+    const rules = rulesFrom(cfg)
     return {
+      rules,
+      attribution: describeRules(rules),
       openai: {
         connected: cfg.openai.connected,
         missing: cfg.openai.missing,
-        filters: { projectIds: cfg.openai.projectIds, apiKeyIds: cfg.openai.apiKeyIds },
+        quizScope: { projectIds: cfg.openai.projectIds, apiKeyIds: cfg.openai.apiKeyIds },
         lastRun: runs.openai ?? null,
         earliestDay: (span('openai')?.earliest as string) ?? null,
         latestDay: (span('openai')?.latest as string) ?? null,
@@ -155,7 +175,7 @@ class ProviderSync {
         connected: cfg.google.connected,
         missing: cfg.google.missing,
         problem: cfg.google.problem ?? null,
-        projectId: cfg.google.projectId ?? null,
+        speechProject: cfg.google.projectId ?? null,
         lastRun: runs.google ?? null,
         earliestDay: (span('google')?.earliest as string) ?? null,
         latestDay: (span('google')?.latest as string) ?? null,
@@ -180,12 +200,13 @@ class ProviderSync {
               unit: r.unit,
               quantity: Math.round(r.quantity * 10_000) / 10_000,
               cost_usd: Math.round(r.costUsd * 1_000_000) / 1_000_000,
+              credits_usd: Math.round(r.creditsUsd * 1_000_000) / 1_000_000,
               source: r.source,
               synced_at: syncedAt,
             }))
           )
           .knexQuery.onConflict(['day', 'provider', 'scope', 'item', 'unit'])
-          .merge(['quantity', 'cost_usd', 'source', 'synced_at'])
+          .merge(['quantity', 'cost_usd', 'credits_usd', 'source', 'synced_at'])
       }
     })
   }
@@ -212,20 +233,24 @@ class ProviderSync {
     }
 
     if (config.openai.connected) {
-      const client = new OpenAiUsageClient({
-        adminKey: config.openai.adminKey!,
-        projectIds: config.openai.projectIds,
-        apiKeyIds: config.openai.apiKeyIds,
-        fetch: deps.fetch,
-      })
+      // The whole organisation: the quiz project/keys are applied when reading
+      const client = new OpenAiUsageClient({ adminKey: config.openai.adminKey!, fetch: deps.fetch })
       // OpenAI's daily buckets are UTC days, labelled with the IST date they start on.
       const startTime = Math.floor(Date.parse(`${firstDay}T00:00:00Z`) / 1000)
       const errors: string[] = []
       let rows = 0
       let fetchedAny = false
+      let costsByKey: boolean | undefined
       for (const [source, fetchRows] of [
         ['openai_usage_api', () => client.completions(startTime, days)],
-        ['openai_costs_api', () => client.costs(startTime, days)],
+        [
+          'openai_costs_api',
+          async () => {
+            const costs = await client.costs(startTime, days)
+            costsByKey = costs.byKey
+            return costs.rows
+          },
+        ],
       ] as const) {
         try {
           const fetched = await fetchRows()
@@ -244,6 +269,7 @@ class ProviderSync {
         rows,
         days,
         dataThrough: fetchedAny ? syncedAt.toISOString() : (previous?.dataThrough ?? null),
+        ...(costsByKey === undefined ? {} : { costsByKey }),
       }
       await this.saveRun('openai', run)
       result.openai = run
@@ -253,7 +279,7 @@ class ProviderSync {
       let run: ProviderRunStatus
       try {
         const client = deps.bigquery ?? (await bigQueryClient(config.google.credentials!))
-        const reader = new BillingReader({ table: config.google.table!, projectId: config.google.projectId!, client })
+        const reader = new BillingReader({ table: config.google.table!, client })
         const billing = await reader.read(firstDay)
         await this.replaceWindow('google', 'gcp_billing_export', firstDay, billing.rows, syncedAt)
         run = { at: syncedAt.toISOString(), ok: true, error: null, rows: billing.rows.length, days, dataThrough: billing.dataThrough, exportedAt: billing.exportedAt }

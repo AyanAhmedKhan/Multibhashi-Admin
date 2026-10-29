@@ -7,6 +7,7 @@ import auditService from '#services/audit_service'
 import providerSync from '#services/analytics/provider_sync'
 import quizAnalytics from '#services/analytics/quiz_analytics'
 import quizCost from '#services/analytics/quiz_cost'
+import fullBill from '#services/analytics/full_bill'
 import { costModelValidator, invoiceValidator, listValidator, providerRefreshValidator } from '#validators/console'
 
 /** Insights: users, engagement, AI tutor usage, cost. Aggregates only. */
@@ -56,12 +57,18 @@ export default class InsightsController {
   async saveInvoice({ request, actor }: HttpContext) {
     const input = await request.validateUsing(invoiceValidator)
     await costService.saveInvoice(actor, { month: input.month, provider: input.provider, amountInr: input.amount_inr, note: input.note }, input.reason)
+    fullBill.clearCache()
     return costService.reconciliation(6)
   }
 
   /** Quiz AI cost: actual provider spend per day, allocated per answer; estimates labelled. */
   async quizCost({ request }: HttpContext) {
     return quizCost.cost(await this.days(request))
+  }
+
+  /** The whole provider bill: every GCP project and OpenAI project/key/model, attributed. */
+  async fullBill({ request }: HttpContext) {
+    return fullBill.bill(await this.days(request))
   }
 
   /** Provider connection and freshness for the Quizzes cost section. */
@@ -87,6 +94,7 @@ export default class InsightsController {
       metadata: { days: result.days, openai: summary(result.openai), google: summary(result.google) },
     })
     quizCost.clearCache()
+    fullBill.clearCache()
     return { result, status: await providerSync.status() }
   }
 
@@ -112,6 +120,8 @@ export default class InsightsController {
       )
     })
     costService.clearCache()
+    quizCost.clearCache()
+    fullBill.clearCache()
     return { model: next, perMinute: perMinuteInr(next) }
   }
 }

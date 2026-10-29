@@ -77,14 +77,20 @@ test.group('Quiz provider sync', (group) => {
     assert.equal(Number(await count()), afterFirst, 'no duplicates on a re-run')
     assert.notExists(await db.from('console_ai_provider_daily').where('item', 'Old service / Old SKU').first(), 'stale row removed')
 
-    const speech = await db.from('console_ai_provider_daily').where('provider', 'google').where('day', '2026-10-27').sum('cost_usd as usd').first()
-    assert.closeTo(Number(speech.usd), 1.64, 1e-6)
+    const speech = await db.from('console_ai_provider_daily').where('provider', 'google').where('day', '2026-10-27').select(db.raw('SUM(cost_usd) AS gross, SUM(credits_usd) AS credits')).first()
+    assert.closeTo(Number(speech.gross), 1.68, 1e-6)
+    assert.closeTo(Number(speech.credits), -0.04, 1e-6, 'credits kept apart')
+    // The whole billing account: other projects and account-level rows are stored too
+    assert.exists(await db.from('console_ai_provider_daily').where('scope', 'multibhashi-web').first())
+    assert.exists(await db.from('console_ai_provider_daily').where('scope', 'no-project').first())
     const openaiCost = await db.from('console_ai_provider_daily').where('source', 'openai_costs_api').where('day', '2026-10-27').sum('cost_usd as usd').first()
     assert.closeTo(Number(openaiCost.usd), 0.0219, 1e-6)
 
     const st = await providerSync.status({ ...config })
     assert.isTrue(st.openai.connected)
     assert.equal(st.google.lastRun?.dataThrough, '2026-10-28T23:00:00.000Z')
+    assert.isTrue(st.openai.lastRun?.costsByKey, 'costs grouped by key when the API accepts it')
+    assert.equal(st.rules.speechProject, 'multibhashi-android-app')
     assert.notProperty(st.google, 'credentials', 'credentials never leave the server')
   })
 

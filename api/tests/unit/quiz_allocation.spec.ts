@@ -11,6 +11,7 @@ import {
 } from '#services/analytics/quiz_allocation'
 import { attemptsFrom, markingPath, sentencesFrom } from '#services/analytics/quiz_analytics'
 import { priceModelOf, providerActuals, ratesFor } from '#services/analytics/quiz_cost'
+import type { AttributionRules } from '#services/analytics/cost_attribution'
 import { DEFAULT_COST_MODEL } from '#services/analytics/cost_model'
 
 // gpt-4o-mini list prices and V2 speech at ₹95.2/$ (the rate card's figures)
@@ -162,6 +163,7 @@ test.group('Quiz cost: which days the providers reported', () => {
     unit,
     quantity,
     costUsd,
+    creditsUsd: 0,
     source,
   })
   const rows = [
@@ -179,7 +181,8 @@ test.group('Quiz cost: which days the providers reported', () => {
   }
 
   test('reported days are actual (zero if nothing billed); days before the first sync or not yet complete are left to the estimate', ({ assert }) => {
-    const reported = providerActuals(rows, model, coverage, 'multibhashi-android-app')
+    const rules: AttributionRules = { speechProject: 'multibhashi-android-app', openaiQuizProjects: [], openaiQuizKeys: [], tutorGcpProjects: ['gen-lang-client-0382165857'] }
+    const reported = providerActuals(rows, model, coverage, rules)
     const a = reported.actualsFor(['2026-10-26', '2026-10-27', '2026-10-28', '2026-10-29'])
     assert.isFalse(a.has('2026-10-26'), 'before the first synced day')
     assert.closeTo(a.get('2026-10-27')!.speechInr!, 0.16 * model.usdToInr, 1e-9, 'speech SKUs of the speech project only')
@@ -195,7 +198,7 @@ test.group('Quiz cost: which days the providers reported', () => {
   })
 
   test('not connected: no day is actual', ({ assert }) => {
-    const none = providerActuals([], model, { google: { from: null, through: null }, openai: { from: null, through: null } }, null)
+    const none = providerActuals([], model, { google: { from: null, through: null }, openai: { from: null, through: null } }, { speechProject: null, openaiQuizProjects: [], openaiQuizKeys: [], tutorGcpProjects: [] })
     assert.equal(none.actualsFor(['2026-10-28']).size, 0)
   })
 

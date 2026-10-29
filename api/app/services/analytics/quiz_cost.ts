@@ -4,12 +4,13 @@ import { costModelStore, priceFor, unitPriceInr, type CostModel } from '#service
 import quizAnalytics, { summary, type AnswerRow, type MarkingPath } from '#services/analytics/quiz_analytics'
 import { allocate, type AnswerFacts, type Basis, type DayActuals, type Rates } from '#services/analytics/quiz_allocation'
 import providerSync from '#services/analytics/provider_sync'
-import { isSpeechSku } from '#services/analytics/gcp_billing'
+import { attribute, googleIsQuizSpeech, openaiIsQuiz, type AttributionRules } from '#services/analytics/cost_attribution'
 
 /**
  * Quiz AI cost (Cost page → Quizzes). Actual daily spend comes from the providers' own data
  * in console_ai_provider_daily (OpenAI Costs API for marking, the GCP billing export for
- * speech-to-text); each day's actual is spread over that day's answers by weight
+ * speech-to-text, net of credits), narrowed to the quizzes by the attribution rules
+ * (cost_attribution.ts); each day's actual is spread over that day's answers by weight
  * (quiz_allocation.ts). Days the providers haven't reported (not connected, export not yet
  * in) are ESTIMATED from the rate card and labelled. Figures in ₹ at the price list's USD rate.
  */
@@ -20,14 +21,16 @@ const n = (v: unknown) => Number(v ?? 0)
 /** gpt-4o-mini-2024-07-18 → gpt-4o-mini: snapshots are priced on the model's line. */
 export const priceModelOf = (model: string) => model.replace(/-\d{4}-\d{2}-\d{2}$/, '')
 
-interface ProviderDbRow {
+export interface ProviderDbRow {
   day: string
   provider: string
   scope: string
   item: string
   unit: string
   quantity: number
+  /** gross */
   costUsd: number
+  creditsUsd: number
   source: string
 }
 
@@ -52,20 +55,28 @@ export function providerActuals(
   rows: ProviderDbRow[],
   model: CostModel,
   coverage: { google: { from: string | null; through: string | null }; openai: { from: string | null; through: string | null } },
-  speechProject: string | null
+  rules: AttributionRules
 ) {
   const actuals = new Map<string, DayActuals>()
   const unpriced = new Set<string>()
   const google = new Map<string, number>()
+  // The quiz backend's own costs; costs that can't be told apart by key; days with any costs row
   const openaiCost = new Map<string, number>()
+  const openaiUnknown = new Map<string, number>()
+  const costDays = new Set<string>()
   const openaiUsage = new Map<string, number>()
+  const add = (m: Map<string, number>, day: string, v: number) => m.set(day, (m.get(day) ?? 0) + v)
   for (const r of rows) {
+    const net = (r.costUsd + r.creditsUsd) * model.usdToInr
     if (r.provider === 'google') {
-      if (speechProject && r.scope !== speechProject) continue
-      if (isSpeechSku(r.item)) google.set(r.day, (google.get(r.day) ?? 0) + r.costUsd * model.usdToInr)
+      if (googleIsQuizSpeech(r, rules)) add(google, r.day, net)
     } else if (r.provider === 'openai' && r.source === 'openai_costs_api') {
-      openaiCost.set(r.day, (openaiCost.get(r.day) ?? 0) + r.costUsd * model.usdToInr)
+      costDays.add(r.day)
+      const quiz = openaiIsQuiz(r.scope, rules)
+      if (quiz === true) add(openaiCost, r.day, net)
+      else if (quiz === null) add(openaiUnknown, r.day, net)
     } else if (r.provider === 'openai' && r.source === 'openai_usage_api' && r.unit !== 'requests') {
+      if (openaiIsQuiz(r.scope, rules) === false) continue
       const line = priceFor(model, 'openai', priceModelOf(r.item), r.unit, r.day)
       if (!line) unpriced.add(`${r.item} ${r.unit}`)
       openaiUsage.set(r.day, (openaiUsage.get(r.day) ?? 0) + (line ? r.quantity * unitPriceInr(line, model.usdToInr) : 0))
@@ -84,8 +95,13 @@ export function providerActuals(
         if (covered(day, coverage.google, istDayStart(dayNum + 1))) a.speechInr = google.get(day) ?? 0
         // OpenAI's buckets are UTC days labelled by their IST start date
         if (covered(day, coverage.openai, (dayNum + 1) * DAY_MS)) {
-          if (openaiCost.has(day)) {
-            a.markingInr = openaiCost.get(day)!
+          if (openaiUnknown.has(day)) {
+            // A key rule, but the Costs API wasn't broken down by key: the quiz keys' usage at
+            // list price, capped by what those projects were charged
+            a.markingInr = (openaiCost.get(day) ?? 0) + Math.min(openaiUnknown.get(day)!, openaiUsage.get(day) ?? 0)
+            a.markingBasis = 'usage'
+          } else if (costDays.has(day)) {
+            a.markingInr = openaiCost.get(day) ?? 0
             a.markingBasis = 'actual'
           } else if (openaiUsage.has(day)) {
             a.markingInr = openaiUsage.get(day)!
@@ -130,7 +146,7 @@ class QuizCostService {
         db
           .from('console_ai_provider_daily')
           .where('day', '>=', firstLabel)
-          .select(db.raw('DATE_FORMAT(day, "%Y-%m-%d") as day'), 'provider', 'scope', 'item', 'unit', 'quantity', 'cost_usd', 'source'),
+          .select(db.raw('DATE_FORMAT(day, "%Y-%m-%d") as day'), 'provider', 'scope', 'item', 'unit', 'quantity', 'cost_usd', 'credits_usd', 'source'),
       ])
       const rows: ProviderDbRow[] = rawRows.map((r: Record<string, unknown>) => ({
         day: String(r.day),
@@ -140,6 +156,7 @@ class QuizCostService {
         unit: String(r.unit),
         quantity: n(r.quantity),
         costUsd: n(r.cost_usd),
+        creditsUsd: n(r.credits_usd),
         source: String(r.source),
       }))
 
@@ -162,7 +179,7 @@ class QuizCostService {
           google: { from: status.google.earliestDay, through: status.google.lastRun?.dataThrough ?? null },
           openai: { from: status.openai.earliestDay, through: status.openai.lastRun?.dataThrough ?? null },
         },
-        status.google.projectId
+        status.rules
       )
       const actuals = reported.actualsFor(dayLabels)
       const rateMemo = new Map<string, Rates>()
@@ -248,50 +265,56 @@ class QuizCostService {
       const actualOf = (pool: 'speech' | 'marking') => sum((d) => (d[`${pool}Basis`] === 'estimated' ? 0 : d[`${pool}Inr`]))
       const estimatedOf = (pool: 'speech' | 'marking') => sum((d) => (d[`${pool}Basis`] === 'estimated' ? d[`${pool}Inr`] : 0))
 
-      // --- what the providers reported, item by item (shown, so a mis-classified SKU is visible)
+      // --- the provider lines attributed to the quizzes (the Full bill view shows all the others)
+      const quizRow = (r: ProviderDbRow) => {
+        const a = attribute(r, status.rules)
+        return a.bucket === 'quizzes' || (a.bucket === null && r.provider === 'openai') ? a : null
+      }
       const items = new Map<string, { provider: string; scope: string; item: string; unit: string; quantity: number; costInr: number; counted: string }>()
       for (const r of rows.filter((x) => inWindow(x.day))) {
+        const a = quizRow(r)
+        if (!a) continue
         const counted =
           r.provider === 'google'
-            ? status.google.projectId && r.scope !== status.google.projectId
-              ? 'other project'
-              : isSpeechSku(r.item)
-                ? 'speech-to-text'
-                : 'not quiz (shown only)'
-            : r.source === 'openai_costs_api'
-              ? 'marking (billed)'
-              : 'marking (usage)'
+            ? 'speech-to-text'
+            : a.bucket === null
+              ? 'marking (split by key usage)'
+              : r.source === 'openai_costs_api'
+                ? 'marking (billed)'
+                : 'marking (usage)'
         const key = `${r.provider}|${r.scope}|${r.item}|${r.unit}|${r.source}`
         const cur = items.get(key) ?? { provider: r.provider, scope: r.scope, item: r.item, unit: r.unit, quantity: 0, costInr: 0, counted }
         cur.quantity += r.quantity
-        cur.costInr += r.costUsd * model.usdToInr
+        cur.costInr += (r.costUsd + r.creditsUsd) * model.usdToInr
         items.set(key, cur)
       }
 
       // --- calibration: estimated vs what the providers counted, on days both exist
-      const usageDays = new Set(rows.filter((r) => r.source === 'openai_usage_api').map((r) => r.day))
-      const speechDays = new Set(rows.filter((r) => r.provider === 'google' && isSpeechSku(r.item)).map((r) => r.day))
+      const quizUsage = rows.filter((r) => r.source === 'openai_usage_api' && openaiIsQuiz(r.scope, status.rules) !== false)
+      const quizSpeech = rows.filter((r) => r.provider === 'google' && googleIsQuizSpeech(r, status.rules))
+      const usageDays = new Set(quizUsage.map((r) => r.day))
+      const speechDays = new Set(quizSpeech.map((r) => r.day))
       const est = (pred: (day: string) => boolean, f: (c: ReturnType<typeof costOf>) => number) =>
         answers.filter((a) => pred(a.day)).reduce((s, a) => s + f(costOf(a)), 0)
-      const actualQty = (pred: (r: ProviderDbRow) => boolean) => rows.filter(pred).reduce((s, r) => s + r.quantity, 0)
+      const actualQty = (list: ProviderDbRow[], pred: (r: ProviderDbRow) => boolean) => list.filter(pred).reduce((s, r) => s + r.quantity, 0)
       const calibration = {
         marking: usageDays.size
           ? {
               days: usageDays.size,
               estimatedCalls: est((d) => usageDays.has(d), (c) => c.estimate.tokens.calls),
-              actualRequests: actualQty((r) => r.source === 'openai_usage_api' && r.unit === 'requests'),
+              actualRequests: actualQty(quizUsage, (r) => r.unit === 'requests'),
               estimatedInputTokens: est((d) => usageDays.has(d), (c) => c.estimate.tokens.input),
-              actualInputTokens: actualQty((r) => r.source === 'openai_usage_api' && (r.unit === 'input_tokens' || r.unit === 'cached_input_tokens')),
+              actualInputTokens: actualQty(quizUsage, (r) => r.unit === 'input_tokens' || r.unit === 'cached_input_tokens'),
               estimatedOutputTokens: est((d) => usageDays.has(d), (c) => c.estimate.tokens.output),
-              actualOutputTokens: actualQty((r) => r.source === 'openai_usage_api' && r.unit === 'output_tokens'),
+              actualOutputTokens: actualQty(quizUsage, (r) => r.unit === 'output_tokens'),
             }
           : null,
         speech: speechDays.size
           ? {
               days: speechDays.size,
               estimatedSeconds: est((d) => speechDays.has(d), (c) => c.estimate.speechSeconds),
-              billedQuantity: actualQty((r) => r.provider === 'google' && isSpeechSku(r.item) && (!status.google.projectId || r.scope === status.google.projectId)),
-              billedUnits: [...new Set(rows.filter((r) => r.provider === 'google' && isSpeechSku(r.item)).map((r) => r.unit))],
+              billedQuantity: actualQty(quizSpeech, () => true),
+              billedUnits: [...new Set(quizSpeech.map((r) => r.unit))],
             }
           : null,
       }

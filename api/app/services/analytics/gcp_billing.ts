@@ -2,20 +2,22 @@ import { ProviderError, clip, mergeRows, num, type ProviderRow } from '#services
 
 /**
  * The GCP Cloud Billing export to BigQuery (standard usage cost table,
- * `project.dataset.gcp_billing_export_v1_<BILLING_ACCOUNT_ID>`). Columns used, as documented
- * by Google: usage_start_time / usage_end_time (TIMESTAMP, hourly windows), project.id,
+ * `project.dataset.gcp_billing_export_v1_<BILLING_ACCOUNT_ID>`): the WHOLE billing account,
+ * every project, service and SKU. Columns used, as documented by Google:
+ * usage_start_time / usage_end_time (TIMESTAMP, hourly windows), project.id,
  * service.description, sku.description, usage.amount, usage.unit, cost (FLOAT, in the
  * billing account's `currency`), currency_conversion_rate (USD → that currency),
  * credits (REPEATED: amount, negative), export_time.
  *
- * Net cost = cost + Σ credits.amount, converted to USD by ÷ currency_conversion_rate.
- * Rows are grouped per IST day of usage_start_time, service and SKU for the speech project
- * only. Which SKUs are speech-to-text is decided by `isSpeechSku`, not by a service name:
- * Google's price page names the Speech-to-Text SKUs "Recognition" (V2, sku 3099-B70F-0949),
- * "Speech Recognition (with/without data logging)" (V1) and "Dynamic Batch Recognition";
- * every other SKU of the project is kept and shown, but not counted as quiz cost.
- * The BigQuery client is injectable so tests run on fixtures.
+ * Gross = cost and credits = Σ credits.amount are kept apart (net = gross + credits), both
+ * converted to USD by ÷ currency_conversion_rate, grouped per IST day of usage_start_time,
+ * project, service, SKU and unit. Rows without a project (taxes, account-level charges) keep
+ * the scope "no-project". What is quiz speech-to-text, AI tutor or anything else is decided
+ * at read time (cost_attribution.ts), never by filtering here. The BigQuery client is
+ * injectable so tests run on fixtures.
  */
+
+export const NO_PROJECT = 'no-project'
 
 export interface BigQueryLike {
   query(options: { query: string; params?: Record<string, unknown> }): Promise<unknown[]>
@@ -24,21 +26,18 @@ export interface BigQueryLike {
 export interface BillingReaderOptions {
   /** `project.dataset.gcp_billing_export_v1_…` */
   table: string
-  /** GCP project whose speech-to-text is billed (multibhashi-android-app). */
-  projectId: string
   client: BigQueryLike
 }
 
 export interface BillingResult {
   rows: ProviderRow[]
-  /** Latest usage_end_time in the export for this project: days ending before it are complete. */
+  /** Latest usage_end_time in the export: days ending before it are complete. */
   dataThrough: string | null
   exportedAt: string | null
 }
 
 /** Billing-export table ids are project.dataset.table; refuse anything else (it goes into SQL). */
 const TABLE = /^[a-z][a-z0-9.:-]{3,100}\.[A-Za-z0-9_]{1,1024}\.[A-Za-z0-9_]{1,1024}$/
-const PROJECT = /^[a-z][a-z0-9.:-]{3,100}$/
 
 export function validTable(table: string) {
   return TABLE.test(table)
@@ -50,24 +49,29 @@ export function isSpeechSku(item: string) {
   return /\brecognition\b/i.test(sku)
 }
 
+/** "Service / SKU" → its two halves. */
+export function splitItem(item: string) {
+  const i = item.indexOf(' / ')
+  return i < 0 ? { service: item, sku: '' } : { service: item.slice(0, i), sku: item.slice(i + 3) }
+}
+
 export function billingQuery(table: string) {
   if (!validTable(table)) throw new ProviderError('GCP_BILLING_EXPORT_TABLE must look like project.dataset.gcp_billing_export_v1_XXXXXX_XXXXXX_XXXXXX')
   const rate = 'IF(currency_conversion_rate IS NULL OR currency_conversion_rate = 0, 1, currency_conversion_rate)'
   return `
 SELECT
   FORMAT_DATE('%Y-%m-%d', DATE(usage_start_time, 'Asia/Kolkata')) AS usage_day,
-  project.id AS project_id,
-  service.description AS service,
-  sku.description AS sku,
+  IFNULL(project.id, '${NO_PROJECT}') AS project_id,
+  IFNULL(service.description, 'unknown service') AS service,
+  IFNULL(sku.description, 'unknown SKU') AS sku,
   IFNULL(usage.unit, '') AS unit,
   SUM(IFNULL(usage.amount, 0)) AS quantity,
-  SUM(cost / ${rate}) AS cost_usd,
+  SUM(IFNULL(cost, 0) / ${rate}) AS cost_usd,
   SUM(IFNULL((SELECT SUM(c.amount) FROM UNNEST(credits) AS c), 0) / ${rate}) AS credits_usd,
   MAX(usage_end_time) AS usage_through,
   MAX(export_time) AS exported_at
 FROM \`${table}\`
-WHERE project.id = @project
-  AND usage_start_time >= TIMESTAMP(@since_day, 'Asia/Kolkata')
+WHERE usage_start_time >= TIMESTAMP(@since_day, 'Asia/Kolkata')
 GROUP BY usage_day, project_id, service, sku, unit`
 }
 
@@ -91,11 +95,12 @@ export function parseBillingRows(raw: Record<string, unknown>[]): BillingResult 
     rows.push({
       day,
       provider: 'google',
-      scope: clip(String(r.project_id ?? 'unknown-project'), 160),
+      scope: clip(String(r.project_id || NO_PROJECT), 160),
       item: clip(`${service} / ${sku}`, 255),
       unit: clip(String(r.unit || 'none'), 48),
       quantity: num(r.quantity),
-      costUsd: num(r.cost_usd) + num(r.credits_usd),
+      costUsd: num(r.cost_usd),
+      creditsUsd: num(r.credits_usd),
       source: 'gcp_billing_export',
     })
     const through = iso(r.usage_through)
@@ -107,15 +112,13 @@ export function parseBillingRows(raw: Record<string, unknown>[]): BillingResult 
 }
 
 export class BillingReader {
-  constructor(private opts: BillingReaderOptions) {
-    if (!PROJECT.test(opts.projectId)) throw new ProviderError('GCP_SPEECH_PROJECT_ID is not a valid project id')
-  }
+  constructor(private opts: BillingReaderOptions) {}
 
-  /** Every SKU billed to the speech project since `sinceDay` (IST, YYYY-MM-DD). */
+  /** Every project, service and SKU on the billing account since `sinceDay` (IST, YYYY-MM-DD). */
   async read(sinceDay: string): Promise<BillingResult> {
     let result: unknown[]
     try {
-      result = await this.opts.client.query({ query: billingQuery(this.opts.table), params: { project: this.opts.projectId, since_day: sinceDay } })
+      result = await this.opts.client.query({ query: billingQuery(this.opts.table), params: { since_day: sinceDay } })
     } catch (error) {
       if (error instanceof ProviderError) throw error
       const e = error as { code?: number; message?: string }

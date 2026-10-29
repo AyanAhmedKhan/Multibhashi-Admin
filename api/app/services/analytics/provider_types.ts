@@ -10,7 +10,10 @@ export interface ProviderRow {
   item: string
   unit: string
   quantity: number
+  /** Gross cost in USD, as the provider reports it. */
   costUsd: number
+  /** Credits and discounts in USD (negative); net = costUsd + creditsUsd. */
+  creditsUsd: number
   source: 'openai_usage_api' | 'openai_costs_api' | 'gcp_billing_export'
 }
 
@@ -33,6 +36,7 @@ export function mergeRows(rows: ProviderRow[]): ProviderRow[] {
     if (cur) {
       cur.quantity += r.quantity
       cur.costUsd += r.costUsd
+      cur.creditsUsd += r.creditsUsd
     } else {
       byKey.set(key, { ...r })
     }

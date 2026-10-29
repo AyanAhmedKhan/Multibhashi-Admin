@@ -8,7 +8,9 @@ import { ProviderError, clip, mergeRows, num, type ProviderRow } from '#services
  *   as `input_tokens` is the uncached part (input_tokens − input_cached_tokens), the same
  *   convention as the tutor's usage (docs/AI_USAGE_SPEC.md);
  * - GET /v1/organization/costs — what OpenAI actually charged per day (USD), grouped by
- *   project and line item (bucket_width 1d only).
+ *   project, line item and API key (bucket_width 1d only).
+ * The console syncs the whole organisation; which project/key is the quiz backend is decided
+ * at read time (cost_attribution.ts).
  * Both are paged (`has_more`, `next_page`). Daily buckets are UTC days; each is labelled with
  * the IST date of its start (00:00 UTC = 05:30 IST), so "a day" here runs 05:30–05:30 IST.
  * The HTTP client is injectable so tests run on fixtures and never call OpenAI.
@@ -60,7 +62,7 @@ export function parseCompletionsUsage(pages: Page[]): ProviderRow[] {
         const cached = num(r.input_cached_tokens)
         // Newer responses also split out the uncached part; older ones only the total.
         const uncached = r.input_uncached_tokens !== undefined && r.input_uncached_tokens !== null ? num(r.input_uncached_tokens) : Math.max(0, input - cached)
-        const base = { day, provider: 'openai' as const, scope, item, costUsd: 0, source: 'openai_usage_api' as const }
+        const base = { day, provider: 'openai' as const, scope, item, costUsd: 0, creditsUsd: 0, source: 'openai_usage_api' as const }
         rows.push(
           { ...base, unit: 'input_tokens', quantity: uncached },
           { ...base, unit: 'cached_input_tokens', quantity: cached },
@@ -73,8 +75,11 @@ export function parseCompletionsUsage(pages: Page[]): ProviderRow[] {
   return mergeRows(rows).filter((r) => r.quantity > 0)
 }
 
-/** Costs API pages → per-day rows carrying OpenAI's own charge (USD) per line item. */
-export function parseCosts(pages: Page[]): ProviderRow[] {
+/**
+ * Costs API pages → per-day rows carrying OpenAI's own charge (USD) per line item. Grouped by
+ * key too (`byKey`), the scope is "project/key" like the usage rows; otherwise just the project.
+ */
+export function parseCosts(pages: Page[], byKey = false): ProviderRow[] {
   const rows: ProviderRow[] = []
   for (const page of pages) {
     for (const bucket of page.data ?? []) {
@@ -88,11 +93,12 @@ export function parseCosts(pages: Page[]): ProviderRow[] {
         rows.push({
           day,
           provider: 'openai',
-          scope: clip(str(r.project_id) ?? 'all-projects', 160),
+          scope: clip(byKey ? `${str(r.project_id) ?? 'all-projects'}/${str(r.api_key_id) ?? 'no-key'}` : (str(r.project_id) ?? 'all-projects'), 160),
           item: clip(str(r.line_item) ?? 'all line items', 255),
           unit: clip(str(r.quantity_unit) ?? 'usd', 48),
           quantity: num(r.quantity),
           costUsd: num(amount.value),
+          creditsUsd: 0,
           source: 'openai_costs_api',
         })
       }
@@ -164,16 +170,25 @@ export class OpenAiUsageClient {
     return parseCompletionsUsage(pages)
   }
 
-  /** OpenAI's charges per day since `startTime` (Unix seconds). */
-  async costs(startTime: number, days: number) {
-    const pages = await this.pages('/v1/organization/costs', {
+  /**
+   * OpenAI's charges per day since `startTime` (Unix seconds), per project, line item and API
+   * key. The API refuses some group_by combinations (HTTP 400); then the key is dropped and the
+   * costs come per project and line item only (`byKey: false`).
+   */
+  async costs(startTime: number, days: number): Promise<{ rows: ProviderRow[]; byKey: boolean }> {
+    const params = (groupBy: string[]) => ({
       start_time: startTime,
       bucket_width: '1d',
       limit: Math.min(180, Math.max(1, days)),
-      group_by: ['project_id', 'line_item'],
+      group_by: groupBy,
       project_ids: this.opts.projectIds?.length ? this.opts.projectIds : undefined,
       api_key_ids: this.opts.apiKeyIds?.length ? this.opts.apiKeyIds : undefined,
     })
-    return parseCosts(pages)
+    try {
+      return { rows: parseCosts(await this.pages('/v1/organization/costs', params(['project_id', 'line_item', 'api_key_id'])), true), byKey: true }
+    } catch (error) {
+      if (!(error instanceof ProviderError) || error.status !== 400) throw error
+      return { rows: parseCosts(await this.pages('/v1/organization/costs', params(['project_id', 'line_item']))), byKey: false }
+    }
   }
 }
