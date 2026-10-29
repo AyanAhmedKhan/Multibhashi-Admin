@@ -9,6 +9,7 @@ import { useReason } from '../../components/dialogs'
 import { Badge, Button, Card, ErrorNote, Field, Input, Modal, Select, Spinner, Stat, Table, Tabs, Td } from '../../components/ui'
 import { Bars, ChartCard } from '../../components/charts'
 import { QuizCostSection } from './QuizCostSection'
+import { FullBillSection } from './FullBillSection'
 
 type Engine = 'sarvam' | 'global' | 'gemini'
 export interface PriceLine {
@@ -89,10 +90,11 @@ interface ReconRow {
 
 const PROVIDER_NAME: Record<string, string> = { sarvam: 'Sarvam', google: 'Google Gemini', livekit: 'LiveKit', other: 'Other' }
 
-/** Cost & margin: the AI tutor (classes) and the quizzes (Speaking and Writing marking), side by side. */
+/** Cost & margin: the AI tutor (classes), the quizzes (Speaking and Writing), and the providers' whole bill. */
 export function CostTab({ days }: { days: number }) {
   const [params, setParams] = useSearchParams()
-  const section = params.get('section') === 'quizzes' ? 'quizzes' : 'tutor'
+  const raw = params.get('section')
+  const section = raw === 'quizzes' || raw === 'bill' ? raw : 'tutor'
   return (
     <>
       <Tabs
@@ -106,9 +108,10 @@ export function CostTab({ days }: { days: number }) {
         items={[
           { value: 'tutor', label: 'AI tutor' },
           { value: 'quizzes', label: 'Quizzes' },
+          { value: 'bill', label: 'Full bill' },
         ]}
       />
-      {section === 'quizzes' ? <QuizCostSection days={days} /> : <TutorCost days={days} />}
+      {section === 'quizzes' ? <QuizCostSection days={days} /> : section === 'bill' ? <FullBillSection days={days} /> : <TutorCost days={days} />}
     </>
   )
 }

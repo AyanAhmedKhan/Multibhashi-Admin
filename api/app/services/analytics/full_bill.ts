@@ -116,6 +116,10 @@ class FullBillService {
       const dayNum = (day: string) => Math.round(Date.parse(`${day}T00:00:00Z`) / DAY_MS)
       const googleComplete = (day: string) => googleThrough !== null && !!status.google.earliestDay && day >= status.google.earliestDay && googleThrough >= istDayStart(dayNum(day) + 1)
       const openaiComplete = (day: string) => openaiThrough !== null && !!status.openai.earliestDay && day >= status.openai.earliestDay && openaiThrough >= (dayNum(day) + 1) * DAY_MS
+      // Still arriving: on or after the source's first synced day, but not complete yet. Days
+      // before a source's first day are simply not covered by it (e.g. before the export existed).
+      const googleArriving = (day: string) => !!status.google.earliestDay && day >= status.google.earliestDay && !googleComplete(day)
+      const openaiArriving = (day: string) => !!status.openai.earliestDay && day >= status.openai.earliestDay && !openaiComplete(day)
 
       // --- per day (window)
       const byDay = <T extends ProviderDbRow>(list: T[]) => {
@@ -183,14 +187,14 @@ class FullBillService {
           markingInr: f.marking,
           googleComplete: googleComplete(day),
           openaiComplete: openaiComplete(day),
-          complete: (!status.google.connected && !googleThrough ? true : googleComplete(day)) && (!status.openai.connected && !openaiThrough ? true : openaiComplete(day)),
+          complete: !googleArriving(day) && !openaiArriving(day),
         }
       })
       const sumSeries = (f: (s: (typeof series)[number]) => number) => series.reduce((s, d) => s + f(d), 0)
 
       // --- per month, with Finance's bills for providers that have no billing API
       const googleMonths = new Set(google.map((r) => r.day.slice(0, 7)))
-      const monthRows = months.map((month) => {
+      const allMonths = months.map((month) => {
         const daysIn = [...new Set(rows.filter((r) => r.day.startsWith(month)).map((r) => r.day))]
         const split = emptySplit()
         let openai = 0
@@ -233,6 +237,9 @@ class FullBillService {
           },
         }
       })
+
+      // Months with something in them (synced days or a bill)
+      const monthRows = allMonths.filter((m) => m.coverage.googleDays || m.coverage.openaiDays || m.manual.length)
 
       // --- GCP: project → service → top SKUs (window)
       const inWindow = (r: ProviderDbRow) => r.day >= firstLabel
@@ -331,6 +338,7 @@ class FullBillService {
       // --- AI tutor: what it computes from usage × price NEXT TO what was billed (never added)
       const geminiNetByMonth = (month: string) =>
         google.filter((r) => r.scope === TUTOR_GEMINI_PROJECT && r.day.startsWith(month)).reduce((s, r) => s + (r.costUsd + r.creditsUsd) * usd, 0)
+      const firstExportMonth = status.google.earliestDay?.slice(0, 7) ?? null
       const tutorComparison = months
         .slice(-3)
         .flatMap((month) =>
@@ -339,13 +347,16 @@ class FullBillService {
             const invoice = invoices.find((i) => i.month === month && i.provider === provider)
             let billed: { inr: number | null; status: string; source: string }
             if (provider === 'google') {
-              billed = googleMonths.has(month)
-                ? geminiNetByMonth(month) || google.some((r) => r.scope === TUTOR_GEMINI_PROJECT && r.day.startsWith(month))
-                  ? { inr: geminiNetByMonth(month), status: 'billed', source: `GCP export, project ${TUTOR_GEMINI_PROJECT}` }
-                  : { inr: null, status: 'not_billed', source: 'not billed (free tier project)' }
-                : invoice
-                  ? { inr: n(invoice.amount_inr), status: 'billed', source: 'Finance’s bill' }
-                  : { inr: null, status: exportHasData ? 'no_export' : 'not_connected', source: exportHasData ? 'export has no rows this month' : 'billing export not connected' }
+              billed =
+                firstExportMonth && month >= firstExportMonth
+                  ? google.some((r) => r.scope === TUTOR_GEMINI_PROJECT && r.day.startsWith(month))
+                    ? { inr: geminiNetByMonth(month), status: 'billed', source: `GCP export, project ${TUTOR_GEMINI_PROJECT}` }
+                    : { inr: null, status: 'not_billed', source: 'not billed (free tier project)' }
+                  : invoice
+                    ? { inr: n(invoice.amount_inr), status: 'billed', source: 'Finance’s bill' }
+                    : firstExportMonth
+                      ? { inr: null, status: 'before_export', source: 'before the billing export started' }
+                      : { inr: null, status: 'not_connected', source: 'billing export not connected' }
             } else {
               billed = invoice ? { inr: n(invoice.amount_inr), status: 'billed', source: 'Finance’s bill' } : { inr: null, status: 'not_entered', source: 'no bill entered (Sarvam/LiveKit have no billing API)' }
             }
@@ -381,6 +392,8 @@ class FullBillService {
         split: { quizzes: sumSeries((d) => d.quizzesInr), tutor: sumSeries((d) => d.tutorInr), other: sumSeries((d) => d.otherInr) },
         quizParts: { speechInr: sumSeries((d) => d.speechInr), markingInr: sumSeries((d) => d.markingInr) },
         incompleteDays: series.filter((d) => !d.complete).map((d) => d.day),
+        googleFrom: status.google.earliestDay,
+        openaiFrom: status.openai.earliestDay,
       }
 
       const anyData = rows.length > 0 || invoices.length > 0

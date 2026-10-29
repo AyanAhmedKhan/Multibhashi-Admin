@@ -27,8 +27,9 @@ interface ProviderRun {
   demo?: boolean
 }
 interface ProviderStatus {
-  openai: { connected: boolean; missing: string[]; filters: { projectIds: string[]; apiKeyIds: string[] }; lastRun: ProviderRun | null; earliestDay: string | null; latestDay: string | null }
-  google: { connected: boolean; missing: string[]; problem: string | null; projectId: string | null; lastRun: ProviderRun | null; earliestDay: string | null; latestDay: string | null }
+  attribution: { speech: string; marking: string; tutor: string }
+  openai: { connected: boolean; missing: string[]; quizScope: { projectIds: string[]; apiKeyIds: string[] }; lastRun: ProviderRun | null; earliestDay: string | null; latestDay: string | null }
+  google: { connected: boolean; missing: string[]; problem: string | null; speechProject: string | null; lastRun: ProviderRun | null; earliestDay: string | null; latestDay: string | null }
 }
 interface QuizCost {
   days: number
@@ -143,6 +144,7 @@ export function QuizCostSection({ days }: { days: number }) {
       if (failed) toast.warning(`Refresh finished with errors. ${parts.join(' · ')}`)
       else toast.success(`Provider data refreshed. ${parts.join(' · ')}`)
       await queryClient.invalidateQueries({ queryKey: ['insights-quiz-cost'] })
+      await queryClient.invalidateQueries({ queryKey: ['insights-full-bill'] })
     } catch (error) {
       toast.error(error instanceof ApiError ? error.message : 'Refresh failed')
     } finally {
@@ -153,7 +155,7 @@ export function QuizCostSection({ days }: { days: number }) {
   const providerCard = (
     <Card
       title="Provider data"
-      description="What OpenAI and Google themselves report, synced daily (quiz:sync-provider-usage) and on Refresh."
+      description="What OpenAI and Google themselves report (the whole bill is under Full bill), synced daily (quiz:sync-provider-usage) and on Refresh."
       actions={
         manage && (
           <Button size="sm" icon={<RefreshCw className="size-4" />} loading={refreshing} onClick={refresh} disabled={!connected} title={connected ? undefined : 'No provider is connected'}>
@@ -170,11 +172,7 @@ export function QuizCostSection({ days }: { days: number }) {
           missing={p.openai.missing}
           lastRun={p.openai.lastRun}
           through={p.openai.lastRun?.dataThrough ?? null}
-          detail={
-            p.openai.filters.projectIds.length || p.openai.filters.apiKeyIds.length
-              ? `Quiz scope: ${[...p.openai.filters.projectIds, ...p.openai.filters.apiKeyIds].join(', ')}${p.openai.earliestDay ? ` · days ${fmtDay(p.openai.earliestDay)} – ${fmtDay(p.openai.latestDay!)}` : ''}`
-              : `Whole organisation (set OPENAI_QUIZ_PROJECT_ID / OPENAI_QUIZ_API_KEY_IDS to narrow it to the quiz backend)${p.openai.earliestDay ? ` · days ${fmtDay(p.openai.earliestDay)} – ${fmtDay(p.openai.latestDay!)}` : ''}`
-          }
+          detail={`Counted as quiz marking: ${p.attribution.marking}${p.openai.earliestDay ? ` · days ${fmtDay(p.openai.earliestDay)} – ${fmtDay(p.openai.latestDay!)}` : ''}`}
         />
         <ProviderRow
           name="Google Cloud"
@@ -184,7 +182,7 @@ export function QuizCostSection({ days }: { days: number }) {
           problem={p.google.problem}
           lastRun={p.google.lastRun}
           through={p.google.lastRun?.dataThrough ?? null}
-          detail={`Project ${p.google.projectId}${p.google.earliestDay ? ` · days ${fmtDay(p.google.earliestDay)} – ${fmtDay(p.google.latestDay!)}` : ' · no rows yet (the export lags by hours to a day)'}`}
+          detail={`Counted as quiz speech-to-text: ${p.attribution.speech}${p.google.earliestDay ? ` · days ${fmtDay(p.google.earliestDay)} – ${fmtDay(p.google.latestDay!)}` : ' · no rows yet (the export lags by hours to a day)'}`}
         />
       </ul>
     </Card>
@@ -373,7 +371,7 @@ export function QuizCostSection({ days }: { days: number }) {
             </p>
           )}
           <p className="px-4 py-3 text-xs text-muted-foreground">
-            Google speech-to-text is the speech project’s SKUs named “…Recognition…” (as on Google’s price page); other SKUs of the project are listed but not counted.
+            Only the lines attributed to the quizzes. Speech-to-text = SKUs named “…Recognition…” (as on Google’s price page) in the speech project; every other line is under Full bill.
           </p>
         </Card>
         <Card title="Estimates vs provider counts" padded={false}>

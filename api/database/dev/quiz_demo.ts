@@ -9,10 +9,13 @@ import { markingPath, sentencesFrom } from '#services/analytics/quiz_analytics'
  * and all three marking paths, the app's quiz_* events for the last week (an app release
  * "shipped" then), evidence-cache rows, and a few days of provider rows so the Quizzes cost
  * section shows billed, usage-priced and estimated days side by side. Answer texts are
- * synthetic. Everything is keyed to the demo learners / demo quizzes and removed by --remove.
+ * synthetic. Also the whole provider bill (several GCP projects with credits, two OpenAI
+ * projects/keys) and a few of Finance's monthly bills. Everything is keyed to the demo
+ * learners / quizzes / "demo" scopes and notes, and removed by --remove.
  */
 
 export const DEMO_PROVIDER_SCOPE = 'demo-'
+const DEMO_INVOICE_NOTE = 'demo (console:seed-demo)'
 const SQ_BASE = 9_600_000
 const STATUS_KEY = 'quiz_provider_sync'
 
@@ -55,7 +58,11 @@ export async function removeQuizDemo(db: Database, opts: Pick<Opts, 'firstUser' 
   if (await exists('quizzes')) await db.from('quizzes').whereIn('id', opts.quizzes.map((q) => q.quizId)).delete()
   await db.from('quiz_questions').whereBetween('id', [SQ_BASE, SQ_BASE + 9999]).delete()
   if (await exists('console_ai_provider_daily')) {
-    await db.from('console_ai_provider_daily').where('scope', 'like', `${DEMO_PROVIDER_SCOPE}%`).delete()
+    await db
+      .from('console_ai_provider_daily')
+      .where((q) => q.where('scope', 'like', `${DEMO_PROVIDER_SCOPE}%`).orWhere('item', 'like', '%(demo)%'))
+      .delete()
+    await db.from('console_cost_invoices').where('note', DEMO_INVOICE_NOTE).delete()
     const status = await db.from('console_settings').where('key', STATUS_KEY).first()
     const value = status ? (typeof status.value === 'string' ? JSON.parse(status.value) : status.value) : null
     if (value && (value.openai?.demo || value.google?.demo)) await db.from('console_settings').where('key', STATUS_KEY).delete()
@@ -272,8 +279,12 @@ export async function seedQuizDemo(db: Database, opts: Opts) {
   await insert('student_activity_events', events)
   await insert('quiz_ai_evaluation_cache', cache)
 
-  // --- provider rows: Google for the 4 complete days before today, OpenAI for 6 (one day
-  // usage-only, as if the Costs API had failed), each near what the answers should cost.
+  // --- the whole provider bill, as the sync would store it. OpenAI: the quiz project/key
+  // (gpt-4o-mini, near what the answers should cost) and a small study-material project
+  // (gpt-3.5-turbo) for 30 days, one day usage-only (as if the Costs API had failed). GCP:
+  // the export "enabled" 12 days ago — the app project (speech-to-text, storage and Firebase
+  // with credits), a web project (Compute with a sustained-use discount, Cloud SQL, egress) and
+  // an account-level tax line. No rows for the tutor's Gemini project: billing is off there.
   const model = DEFAULT_COST_MODEL
   const rates = {
     speechPerSecondInr: (0.016 / 60) * model.usdToInr,
@@ -283,7 +294,9 @@ export async function seedQuizDemo(db: Database, opts: Opts) {
   const label = (offset: number) => new Date(todayStart - offset * day + 19_800_000).toISOString().slice(0, 10)
   const syncedAt = new Date(opts.now - 30 * 60_000)
   const provider: Record<string, unknown>[] = []
-  for (let offset = 1; offset <= 6; offset++) {
+  const GCP_DAYS = 12
+  const OPENAI_DAYS = 30
+  for (let offset = 1; offset <= OPENAI_DAYS; offset++) {
     const d = label(offset)
     const onDay = facts.filter((f) => f.day === d)
     const est = onDay.map((f) => estimate(f, rates))
@@ -293,44 +306,85 @@ export async function seedQuizDemo(db: Database, opts: Opts) {
     const calls = est.reduce((s, e) => s + e.tokens.calls, 0)
     const drift = 0.92 + random() * 0.2
     const cached = Math.round(input * 0.18)
-    const row = (p: string, scope: string, item: string, unit: string, quantity: number, costUsd: number, source: string) =>
-      provider.push({ day: d, provider: p, scope, item, unit, quantity: Math.round(quantity * 10_000) / 10_000, cost_usd: Math.round(costUsd * 1e6) / 1e6, source, synced_at: syncedAt })
-    if (offset <= 4) {
+    const row = (p: string, scope: string, item: string, unit: string, quantity: number, costUsd: number, source: string, creditsUsd = 0) =>
+      provider.push({
+        day: d,
+        provider: p,
+        scope,
+        item,
+        unit,
+        quantity: Math.round(quantity * 10_000) / 10_000,
+        cost_usd: Math.round(costUsd * 1e6) / 1e6,
+        credits_usd: Math.round(creditsUsd * 1e6) / 1e6,
+        source,
+        synced_at: syncedAt,
+      })
+    if (offset <= GCP_DAYS) {
+      const app = 'demo-multibhashi-android-app'
+      const web = 'demo-multibhashi-web'
       const billedSeconds = Math.round(seconds * drift)
-      row('google', 'demo-speech-project', 'Speech service (demo) / Recognition', 'seconds', billedSeconds, (billedSeconds / 60) * 0.016, 'gcp_billing_export')
-      row('google', 'demo-speech-project', 'Storage service (demo) / Standard Storage Mumbai', 'byte-seconds', 2.6e14, 0.21, 'gcp_billing_export')
+      row('google', app, 'Speech service (demo) / Recognition', 'seconds', billedSeconds, (billedSeconds / 60) * 0.016, 'gcp_billing_export')
+      row('google', app, 'Storage service (demo) / Standard Storage Mumbai', 'byte-seconds', 2.6e14, 0.21, 'gcp_billing_export', -0.05)
+      row('google', app, 'Firebase service (demo) / Cloud Functions invocations', 'requests', 41_000 + int(0, 8000), 0.016, 'gcp_billing_export', -0.016)
+      const core = 0.9 + random() * 0.15
+      row('google', web, 'Compute service (demo) / N2 Instance Core running in Mumbai', 'seconds', 172_800, core, 'gcp_billing_export', -core * 0.2)
+      row('google', web, 'Compute service (demo) / N2 Instance Ram running in Mumbai', 'byte-seconds', 7.4e14, core * 0.45, 'gcp_billing_export', -core * 0.09)
+      row('google', web, 'Cloud SQL service (demo) / Cloud SQL for MySQL: Zonal - vCPU in Mumbai', 'seconds', 86_400, 1.12, 'gcp_billing_export')
+      row('google', web, 'Networking service (demo) / Network Internet Data Transfer Out from Mumbai', 'bytes', 3.1e10 + int(0, 5e9), 0.28 + random() * 0.08, 'gcp_billing_export')
+      row('google', 'no-project', 'Invoice (demo) / Tax', 'none', 0, 0.42 + random() * 0.05, 'gcp_billing_export')
     }
-    const usage = 'demo-proj_quiz/demo-key_quiz'
+    const quizKey = 'demo-proj_quiz/demo-key_quiz'
+    const smKey = 'demo-proj_studymaterial/demo-key_sm'
     const inputTokens = Math.round((input - cached) * drift)
     const outputTokens = Math.round(output * drift)
-    row('openai', usage, 'gpt-4o-mini-2024-07-18', 'input_tokens', inputTokens, 0, 'openai_usage_api')
-    row('openai', usage, 'gpt-4o-mini-2024-07-18', 'cached_input_tokens', cached, 0, 'openai_usage_api')
-    row('openai', usage, 'gpt-4o-mini-2024-07-18', 'output_tokens', outputTokens, 0, 'openai_usage_api')
-    row('openai', usage, 'gpt-4o-mini-2024-07-18', 'requests', Math.round(calls * drift), 0, 'openai_usage_api')
+    const smIn = int(20_000, 60_000)
+    const smOut = int(4000, 9000)
+    row('openai', quizKey, 'gpt-4o-mini-2024-07-18', 'input_tokens', inputTokens, 0, 'openai_usage_api')
+    row('openai', quizKey, 'gpt-4o-mini-2024-07-18', 'cached_input_tokens', cached, 0, 'openai_usage_api')
+    row('openai', quizKey, 'gpt-4o-mini-2024-07-18', 'output_tokens', outputTokens, 0, 'openai_usage_api')
+    row('openai', quizKey, 'gpt-4o-mini-2024-07-18', 'requests', Math.round(calls * drift), 0, 'openai_usage_api')
+    row('openai', smKey, 'gpt-3.5-turbo-0125', 'input_tokens', smIn, 0, 'openai_usage_api')
+    row('openai', smKey, 'gpt-3.5-turbo-0125', 'output_tokens', smOut, 0, 'openai_usage_api')
+    row('openai', smKey, 'gpt-3.5-turbo-0125', 'requests', int(20, 60), 0, 'openai_usage_api')
     if (offset !== 5) {
-      const costs = 'demo-proj_quiz'
-      row('openai', costs, 'gpt-4o-mini-2024-07-18, input', 'tokens', inputTokens, (inputTokens * 0.15) / 1e6, 'openai_costs_api')
-      row('openai', costs, 'gpt-4o-mini-2024-07-18, cached input', 'tokens', cached, (cached * 0.075) / 1e6, 'openai_costs_api')
-      row('openai', costs, 'gpt-4o-mini-2024-07-18, output', 'tokens', outputTokens, (outputTokens * 0.6) / 1e6, 'openai_costs_api')
+      row('openai', quizKey, 'gpt-4o-mini-2024-07-18, input', 'tokens', inputTokens, (inputTokens * 0.15) / 1e6, 'openai_costs_api')
+      row('openai', quizKey, 'gpt-4o-mini-2024-07-18, cached input', 'tokens', cached, (cached * 0.075) / 1e6, 'openai_costs_api')
+      row('openai', quizKey, 'gpt-4o-mini-2024-07-18, output', 'tokens', outputTokens, (outputTokens * 0.6) / 1e6, 'openai_costs_api')
+      row('openai', smKey, 'gpt-3.5-turbo-0125, input', 'tokens', smIn, (smIn * 0.5) / 1e6, 'openai_costs_api')
+      row('openai', smKey, 'gpt-3.5-turbo-0125, output', 'tokens', smOut, (smOut * 1.5) / 1e6, 'openai_costs_api')
     }
   }
   await insert('console_ai_provider_daily', provider)
-  const run = (dataThrough: string, rows: number) => ({ at: syncedAt.toISOString(), ok: true, error: null, rows, days: 7, dataThrough, demo: true })
+  const run = (dataThrough: string, rows: number, days: number, extra = {}) => ({ at: syncedAt.toISOString(), ok: true, error: null, rows, days, dataThrough, demo: true, ...extra })
   await db
     .insertQuery()
     .table('console_settings')
     .insert({
       key: STATUS_KEY,
       value: JSON.stringify({
-        openai: run(syncedAt.toISOString(), provider.filter((p) => p.provider === 'openai').length),
+        openai: run(syncedAt.toISOString(), provider.filter((p) => p.provider === 'openai').length, OPENAI_DAYS, { costsByKey: true }),
         // The export is complete through the end of yesterday (IST), plus a little of today
-        google: run(new Date(todayStart + 40 * 60_000).toISOString(), provider.filter((p) => p.provider === 'google').length),
+        google: run(new Date(todayStart + 40 * 60_000).toISOString(), provider.filter((p) => p.provider === 'google').length, GCP_DAYS),
       }),
       updated_by: null,
       updated_at: new Date(),
     })
     .knexQuery.onConflict('key')
     .merge()
+
+  // --- Finance's monthly bills for providers without a billing API (only where none was entered)
+  const thisMonth = new Date(opts.now + 19_800_000).toISOString().slice(0, 7)
+  const lastMonth = new Date(Date.UTC(Number(thisMonth.slice(0, 4)), Number(thisMonth.slice(5, 7)) - 2, 1)).toISOString().slice(0, 7)
+  for (const [month, name, amount] of [
+    [lastMonth, 'sarvam', 3150],
+    [lastMonth, 'livekit', 420],
+    [thisMonth, 'sarvam', 2890],
+  ] as const) {
+    const existing = await db.from('console_cost_invoices').where('month', month).where('provider', name).first()
+    if (!existing) {
+      await db.table('console_cost_invoices').insert({ month, provider: name, amount_inr: amount, note: DEMO_INVOICE_NOTE, entered_by: 0, created_at: new Date(), updated_at: new Date() })
+    }
+  }
 
   return { answers, events: events.length, providerRows: provider.length }
 }
