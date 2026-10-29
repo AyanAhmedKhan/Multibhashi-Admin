@@ -41,6 +41,8 @@ export interface ProviderRunStatus {
   /** Usage up to this instant is in: days that end before it are complete. */
   dataThrough: string | null
   exportedAt?: string | null
+  /** Rows written by console:seed-demo (local only), not by a provider. */
+  demo?: boolean
 }
 
 export type SyncStatus = Partial<Record<'openai' | 'google', ProviderRunStatus>>

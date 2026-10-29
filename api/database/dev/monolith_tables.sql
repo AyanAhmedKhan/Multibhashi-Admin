@@ -59,6 +59,13 @@ CREATE TABLE IF NOT EXISTS student_activity_events (
   resource_id VARCHAR(64) NULL,
   duration_sec INT NULL,
   context_type VARCHAR(24) NULL,
+  -- Attribution the backend writes (ActivityController.recordEvents); older local copies get
+  -- them from `console:dev-schema` (ALTER).
+  webinar_class_id INT UNSIGNED NULL,
+  session_call_id INT UNSIGNED NULL,
+  course_booking_id INT UNSIGNED NULL,
+  course_lesson_id INT UNSIGNED NULL,
+  user_quiz_log_id INT UNSIGNED NULL,
   metadata JSON NULL,
   created_at_ms BIGINT NOT NULL,
   created_at DATETIME NULL,
@@ -181,4 +188,153 @@ CREATE TABLE IF NOT EXISTS direct_leads (
   created_at DATETIME NULL,
   updated_at DATETIME NULL,
   KEY idx_dl_user (user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Quizzes (QuizController / SessionController.saveQuizLog). Speaking (SQ) and Writing (WQ)
+-- answers live in three detail tables, one per delivery, each under its parent log. Only the
+-- user_ details carry the LSRW marking columns here (the backend writes them only there), so
+-- the console's "degrade without LSRW columns" path runs locally too.
+CREATE TABLE IF NOT EXISTS quizzes (
+  id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  name VARCHAR(255) NULL,
+  created_at DATETIME NULL,
+  updated_at DATETIME NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS user_quiz_logs (
+  id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  uuid VARCHAR(64) NULL,
+  user_id INT UNSIGNED NOT NULL,
+  quiz_id INT UNSIGNED NOT NULL,
+  assignment_id INT UNSIGNED NULL,
+  course_booking_id INT UNSIGNED NULL,
+  type VARCHAR(32) NULL,
+  assessment_type VARCHAR(20) NULL,
+  quiz_start_timestamp BIGINT NULL,
+  quiz_end_timestamp BIGINT NULL,
+  total_questions INT NULL,
+  total_correct_answer INT NULL,
+  total_incorrect_answer INT NULL,
+  total_question_attempt INT NULL,
+  total_timeout INT NULL,
+  is_quiz_finised TINYINT NOT NULL DEFAULT 0,
+  attempt INT NOT NULL DEFAULT 1,
+  created_at DATETIME NULL,
+  updated_at DATETIME NULL,
+  KEY idx_uql_user (user_id, quiz_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS user_quiz_log_details (
+  id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  uuid VARCHAR(64) NULL,
+  user_quiz_log_id INT UNSIGNED NOT NULL,
+  quiz_question_id INT UNSIGNED NOT NULL,
+  question_start_timestamp BIGINT NOT NULL DEFAULT 0,
+  question_end_timestamp BIGINT NOT NULL DEFAULT 0,
+  is_correct TINYINT NULL,
+  relevance_score DOUBLE NULL,
+  grammar_score DOUBLE NULL,
+  answer TEXT NULL,
+  finished_on_time TINYINT NULL,
+  time_taken DOUBLE NULL,
+  pronunciation_score DOUBLE NULL,
+  audio_quality_score DOUBLE NULL,
+  scoring_version INT NULL,
+  prompt_version VARCHAR(32) NULL,
+  model_name VARCHAR(64) NULL,
+  final_percentage DECIMAL(5,2) NULL,
+  evaluation_json JSON NULL,
+  evaluation_status VARCHAR(16) NULL,
+  created_at DATETIME NULL,
+  updated_at DATETIME NULL,
+  KEY idx_uqld_log (user_quiz_log_id, quiz_question_id),
+  KEY idx_uqld_created (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS webinar_class_quiz_logs (
+  id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  uuid VARCHAR(64) NULL,
+  user_id INT UNSIGNED NOT NULL,
+  quiz_id INT UNSIGNED NOT NULL,
+  webinar_class_id INT UNSIGNED NULL,
+  quiz_start_timestamp BIGINT NULL,
+  quiz_end_timestamp BIGINT NULL,
+  total_questions INT NULL,
+  total_timeout INT NULL,
+  is_quiz_finised TINYINT NOT NULL DEFAULT 0,
+  attempt INT NOT NULL DEFAULT 1,
+  created_at DATETIME NULL,
+  updated_at DATETIME NULL,
+  KEY idx_wcql_user (user_id, quiz_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS webinar_class_quiz_log_details (
+  id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  uuid VARCHAR(64) NULL,
+  webinar_class_quiz_log_id INT UNSIGNED NOT NULL,
+  quiz_question_id INT UNSIGNED NOT NULL,
+  question_start_timestamp BIGINT NOT NULL DEFAULT 0,
+  question_end_timestamp BIGINT NOT NULL DEFAULT 0,
+  is_correct TINYINT NULL,
+  relevance_score DOUBLE NULL,
+  grammar_score DOUBLE NULL,
+  answer TEXT NULL,
+  finished_on_time TINYINT NULL,
+  time_taken DOUBLE NULL,
+  pronunciation_score DOUBLE NULL,
+  audio_quality_score DOUBLE NULL,
+  created_at DATETIME NULL,
+  updated_at DATETIME NULL,
+  KEY idx_wcqld_log (webinar_class_quiz_log_id, quiz_question_id),
+  KEY idx_wcqld_created (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS session_call_quiz_logs (
+  id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  uuid VARCHAR(64) NULL,
+  user_id INT UNSIGNED NOT NULL,
+  quiz_id INT UNSIGNED NOT NULL,
+  session_call_id INT UNSIGNED NULL,
+  quiz_start_timestamp BIGINT NULL,
+  quiz_end_timestamp BIGINT NULL,
+  total_questions INT NULL,
+  total_timeout INT NULL,
+  is_quiz_finised TINYINT NOT NULL DEFAULT 0,
+  attempt INT NOT NULL DEFAULT 1,
+  created_at DATETIME NULL,
+  updated_at DATETIME NULL,
+  KEY idx_scql_user (user_id, quiz_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS session_call_quiz_log_details (
+  id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  uuid VARCHAR(64) NULL,
+  session_call_quiz_log_id INT UNSIGNED NOT NULL,
+  quiz_question_id INT UNSIGNED NOT NULL,
+  question_start_timestamp BIGINT NOT NULL DEFAULT 0,
+  question_end_timestamp BIGINT NOT NULL DEFAULT 0,
+  is_correct TINYINT NULL,
+  relevance_score DOUBLE NULL,
+  grammar_score DOUBLE NULL,
+  answer TEXT NULL,
+  finished_on_time TINYINT NULL,
+  time_taken DOUBLE NULL,
+  pronunciation_score DOUBLE NULL,
+  audio_quality_score DOUBLE NULL,
+  created_at DATETIME NULL,
+  updated_at DATETIME NULL,
+  KEY idx_scqld_log (session_call_quiz_log_id, quiz_question_id),
+  KEY idx_scqld_created (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Evidence marking's accepted assessments (LsrwEvaluationStore; migration
+-- 1791504000000_quiz_ai_evaluation_cache_schema in the migrations repo).
+CREATE TABLE IF NOT EXISTS quiz_ai_evaluation_cache (
+  id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  context_hash CHAR(64) NOT NULL,
+  quiz_question_id INT UNSIGNED NULL,
+  evaluation_json JSON NULL,
+  created_at DATETIME NULL,
+  updated_at DATETIME NULL,
+  UNIQUE KEY uq_qaec_hash (context_hash)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
