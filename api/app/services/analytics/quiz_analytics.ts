@@ -281,13 +281,15 @@ class QuizAnalytics {
           has('evaluation_json') ? `${json('d.evaluation_json', '$.diagnostics[*].stage')} AS fail_stages` : 'NULL AS fail_stages',
           has('evaluation_json') ? `${jsonText('d.evaluation_json', '$.reason')} AS fail_reason` : 'NULL AS fail_reason',
         ]
+        const firstId = await this.firstIdSince(t.details, since)
+        if (firstId === null) continue
         const rows = await conn().rawQuery(
           `SELECT ${select.join(', ')}
            FROM ${t.details} d
            JOIN ${t.logs} l ON l.id = d.${t.fk}
            JOIN quiz_questions q ON q.id = d.quiz_question_id
-           WHERE q.type_code IN ('SQ', 'WQ') AND d.created_at >= ?`,
-          [since]
+           WHERE d.id >= ? AND q.type_code IN ('SQ', 'WQ') AND d.created_at >= ?`,
+          [firstId, since]
         )
         for (const r of rows[0] as Record<string, unknown>[]) {
           const endMs = numOrNull(r.end_ms)
@@ -392,9 +394,40 @@ class QuizAnalytics {
   }
 
   /** Evidence assessments accepted per day and how many needed a retry (cache table, optional). */
+  /**
+   * Smallest id created on or after `since`. The answer tables have no index on
+   * created_at (production: 626k rows / 1.2 GB), so a created_at filter alone scans the
+   * whole table on the live database. Ids grow with time, so a binary search on the
+   * primary key finds the window's start in ~20 index lookups. A day of margin covers
+   * rows written slightly out of order; the query still filters on created_at.
+   */
+  private async firstIdSince(table: string, since: Date): Promise<number | null> {
+    const from = new Date(since.getTime() - 86_400_000)
+    const bounds = await conn().from(table).min('id as lo').max('id as hi').first()
+    let lo = n(bounds?.lo)
+    let hi = n(bounds?.hi)
+    if (!hi) return null
+    const firstFrom = (id: number) => conn().from(table).where('id', '>=', id).orderBy('id', 'asc').select('id', 'created_at').first()
+    const newest = await firstFrom(hi)
+    if (!newest?.created_at || new Date(newest.created_at) < from) return null
+    while (lo < hi) {
+      const mid = Math.floor((lo + hi) / 2)
+      const row = await firstFrom(mid)
+      if (row?.created_at && new Date(row.created_at) >= from) hi = mid
+      else lo = Math.min(n(row?.id ?? mid) + 1, hi)
+    }
+    return lo
+  }
+
   async evaluationCache(days: number) {
     const schema = await this.schema()
     if (!schema.has('quiz_ai_evaluation_cache') || !schema.has('quiz_ai_evaluation_cache', 'evaluation_json')) return null
+    // Production: 1.2 GB with no created_at index and no numeric id, so a date filter
+    // would scan every evaluation blob. Skip it unless created_at is indexed.
+    const indexed = await conn().rawQuery(
+      `SELECT 1 FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'quiz_ai_evaluation_cache' AND COLUMN_NAME = 'created_at' AND SEQ_IN_INDEX = 1 LIMIT 1`
+    )
+    if (!(indexed[0] as unknown[]).length) return null
     const since = new Date(istDayStart(istDayOf(Date.now()) - days + 1))
     const retried = `CASE WHEN JSON_VALID(evaluation_json) AND JSON_LENGTH(JSON_EXTRACT(evaluation_json, '$.evidence_review.diagnostics')) > 0 THEN 1 ELSE 0 END`
     const rows = await conn()
