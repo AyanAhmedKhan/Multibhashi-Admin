@@ -36,6 +36,18 @@ function canonical(value: unknown): string {
   return JSON.stringify(value)
 }
 
+/**
+ * Non-integer numbers rounded to 15 significant digits. MySQL's JSON type doesn't read a
+ * 17-digit decimal back bit-for-bit (1.4936000000000003 returns as 1.4936000000000005),
+ * which would make a genuine entry fail verification; 15 digits round-trip exactly.
+ */
+export function stableNumbers(value: unknown): unknown {
+  if (typeof value === 'number') return Number.isFinite(value) && !Number.isInteger(value) ? Number(value.toPrecision(15)) : value
+  if (Array.isArray(value)) return value.map(stableNumbers)
+  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, stableNumbers(v)]))
+  return value
+}
+
 interface Row {
   id?: number
   created_at: Date
@@ -101,7 +113,7 @@ class AuditService {
       target_id: entry.targetId === undefined || entry.targetId === null ? null : String(entry.targetId),
       outcome: entry.outcome ?? 'success',
       reason: entry.reason?.slice(0, 500) ?? null,
-      metadata: entry.metadata ? JSON.parse(canonical(entry.metadata)) : null,
+      metadata: entry.metadata ? stableNumbers(JSON.parse(canonical(entry.metadata))) : null,
       ip: actor?.ip ?? entry.ip ?? null,
       user_agent: (actor?.userAgent ?? entry.userAgent ?? null)?.slice(0, 255) ?? null,
       request_id: actor?.requestId ?? entry.requestId ?? null,

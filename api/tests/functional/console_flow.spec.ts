@@ -444,6 +444,17 @@ test.group('Console end to end', (group) => {
     })
     badModel.assertStatus(422)
 
+    // A real price-list save: its audit entry carries per-minute costs (long decimals),
+    // and the audit chain must still verify afterwards
+    const saved = await as(client, admin, 'put', '/api/insights/cost-model').json({
+      model: { ...cost.body().model, usdToInr: 95.37 },
+      reason: 'USD rate from the bank statement (test)',
+    })
+    saved.assertStatus(200)
+    const chain = await as(client, admin, 'post', '/api/audit/verify').json({})
+    assert.isTrue(chain.body().ok, `audit chain after a price save: ${JSON.stringify(chain.body())}`)
+    await db.from('console_settings').where('key', 'cost_model').delete()
+
     // Reconciliation: enter a bill, see it next to the computed figure
     const month = new Date(Date.now() + 19_800_000).toISOString().slice(0, 7)
     const bill = await as(client, admin, 'put', '/api/insights/invoices').json({
@@ -465,13 +476,13 @@ test.group('Console end to end', (group) => {
         kind, provider, model, unit, quantity, created_at: now, updated_at: now,
       })
       await db.table('ai_tutor_session_usage').multiInsert([
-        row('stt', 'sarvam', 'saaras:v3-realtime', 'audio_seconds', 3600), // ₹30
-        row('tts', 'sarvam', 'bulbul:v3', 'characters', 10_000), // ₹30
+        row('stt', 'sarvam', 'saaras:v3-realtime', 'audio_seconds', 3600), // 60 min × ₹0.49 = ₹29.40
+        row('tts', 'sarvam', 'bulbul:v3', 'characters', 10_000), // 10 × ₹3 per 1,000 = ₹30
         row('tts', 'acme', 'voice-1', 'characters', 500), // unpriced
       ])
       const classCost = await as(client, admin, 'get', `/api/tutor/classes/${chat.id}/cost`)
       classCost.assertStatus(200)
-      assert.closeTo(classCost.body().totalInr, 60, 1e-6)
+      assert.closeTo(classCost.body().totalInr, 59.4, 1e-6)
       assert.isTrue(classCost.body().items.some((i: { priced: boolean }) => !i.priced))
       await db.from('ai_tutor_session_usage').where('ai_tutor_chat_id', chat.id).delete()
     }

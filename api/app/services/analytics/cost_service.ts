@@ -5,11 +5,15 @@ import { istDayLabel, istDayOf, istDayStart } from '#helpers/ist'
 import {
   ENGINES,
   UNIT_LABEL,
+  baseIdOf,
   costModelStore,
   estimateEngine,
+  istToday,
+  modelStatus,
   perMinuteInr,
   priceFor,
   unitPriceInr,
+  withLatestPrices,
   type CostModel,
 } from '#services/analytics/cost_model'
 import type { Actor } from '#services/actor'
@@ -18,7 +22,7 @@ import type { Actor } from '#services/actor'
  * AI cost. Classes with rows in `ai_tutor_session_usage` (docs/AI_USAGE_SPEC.md) are
  * priced exactly: recorded quantity × rate-card price. Classes without rows (before usage
  * recording, or a lost save) are estimated from minutes × the per-minute assumptions, and
- * every figure says how much of it is exact.
+ * every figure says how much of it is exact. Both use the prices in force on the class's day.
  */
 
 const USAGE = 'ai_tutor_session_usage'
@@ -32,6 +36,7 @@ const round = (v: number, digits = 2) => Math.round(v * 10 ** digits) / 10 ** di
 
 interface UsageRow {
   chat: number
+  day: string
   engine: string
   language: string | null
   kind: string
@@ -77,9 +82,18 @@ class CostService {
     return exists
   }
 
-  private price(model: CostModel, row: Pick<UsageRow, 'provider' | 'model' | 'unit' | 'quantity'>) {
-    const line = priceFor(model, row.provider, row.model, row.unit)
+  private price(model: CostModel, row: Pick<UsageRow, 'provider' | 'model' | 'unit' | 'quantity' | 'day'>) {
+    const line = priceFor(model, row.provider, row.model, row.unit, row.day)
     return { line, inr: line ? row.quantity * unitPriceInr(line, model.usdToInr) : 0 }
+  }
+
+  /** Per-minute estimates per day (a price can change on a date). */
+  private ratesByDay(model: CostModel) {
+    const memo = new Map<string, ReturnType<typeof perMinuteInr>>()
+    return (day: string) => {
+      if (!memo.has(day)) memo.set(day, perMinuteInr(model, day))
+      return memo.get(day)!
+    }
   }
 
   cost(days: number) {
@@ -89,6 +103,7 @@ class CostService {
       const since = new Date(istDayStart(firstDay))
       const model = await costModelStore.get()
       const rates = perMinuteInr(model)
+      const ratesOn = this.ratesByDay(model)
       const recorded = await this.usageRecorded()
 
       const [classes, sold, usage] = await Promise.all([
@@ -103,14 +118,15 @@ class CostService {
               .from(`${USAGE} as u`)
               .join('ai_tutor_chats as c', 'c.id', 'u.ai_tutor_chat_id')
               .where('c.created_at', '>=', since)
-              .groupBy('u.ai_tutor_chat_id', 'u.engine', 'u.language', 'u.kind', 'u.provider', 'u.model', 'u.unit')
-              .select('u.ai_tutor_chat_id as chat', 'u.engine', 'u.language', 'u.kind', 'u.provider', 'u.model', 'u.unit')
+              .groupBy('u.ai_tutor_chat_id', 'u.engine', 'u.language', 'u.kind', 'u.provider', 'u.model', 'u.unit', 'day')
+              .select('u.ai_tutor_chat_id as chat', 'u.engine', 'u.language', 'u.kind', 'u.provider', 'u.model', 'u.unit', conn().raw('DATE_FORMAT(c.created_at, "%Y-%m-%d") as day'))
               .sum('u.quantity as quantity')
           : Promise.resolve([]),
       ])
 
       const rows: UsageRow[] = usage.map((u: Record<string, unknown>) => ({
         chat: n(u.chat),
+        day: String(u.day),
         engine: String(u.engine),
         language: (u.language as string) ?? null,
         kind: String(u.kind),
@@ -143,7 +159,11 @@ class CostService {
         const chat = perChat.get(r.chat) ?? { inr: 0, engine: r.engine }
         chat.inr += inr
         perChat.set(r.chat, chat)
-        if (line) engineQty.set(`${r.engine}|${line.id}`, (engineQty.get(`${r.engine}|${line.id}`) ?? 0) + r.quantity)
+        if (line) {
+          // Calibration compares with the estimate, which names the first line of a key.
+          const base = `${r.engine}|${baseIdOf(model, line)}`
+          engineQty.set(base, (engineQty.get(base) ?? 0) + r.quantity)
+        }
       }
 
       // --- estimate the classes without usage rows
@@ -179,15 +199,16 @@ class CostService {
           top.push({ id: n(c.id), userId: n(c.user_id), topic: c.lesson_topic, engine: exact.engine, minutes: spent, costInr: exact.inr })
         } else {
           const engine = estimateEngine(c.language, model.defaultEngine)
-          const inr = spent * rates[engine].total
+          const dayRates = ratesOn(String(c.day))[engine]
+          const inr = spent * dayRates.total
           estimatedInr += inr
           day.estimated += inr
           const e = engineOf(engine)
           e.classes++
           e.minutes += spent
           e.estimatedInr += inr
-          for (const part of rates[engine].parts) {
-            const line = model.prices.find((p) => p.id === part.priceId)
+          for (const part of dayRates.parts) {
+            const line = model.prices.find((p) => p.id === part.lineId)
             if (!line) continue
             const cur = lines.get(line.id) ?? { label: line.label, provider: line.provider, model: line.model, unit: line.unit, quantity: 0, exactInr: 0, estimatedInr: 0, priced: true }
             cur.estimatedInr += spent * part.inr
@@ -261,6 +282,9 @@ class CostService {
         }),
         topClasses: top.sort((a, b) => b.costInr - a.costInr).slice(0, 10),
         calibration,
+        // Official prices re-checked after the saved price list: the page offers to apply them.
+        modelStatus: modelStatus(model),
+        latestModel: modelStatus(model).outdated ? withLatestPrices(model) : null,
         series: Array.from({ length: days }, (_, i) => {
           const label = istDayLabel(firstDay + i)
           const d = dayMap.get(label) ?? { exact: 0, estimated: 0 }
@@ -275,6 +299,8 @@ class CostService {
   async classCost(chatId: number) {
     const model = await costModelStore.get()
     if (!(await this.usageRecorded())) return { recorded: false, items: [], totalInr: 0, jobs: 0 }
+    const chat = await conn().from('ai_tutor_chats').where('id', chatId).select(conn().raw('DATE_FORMAT(created_at, "%Y-%m-%d") as day')).first()
+    const day = chat?.day ? String(chat.day) : istToday()
     const [rows, jobs] = await Promise.all([
       conn()
         .from(USAGE)
@@ -285,7 +311,7 @@ class CostService {
       conn().from(USAGE).where('ai_tutor_chat_id', chatId).countDistinct('job_id as jobs').first(),
     ])
     const items = rows.map((r: Record<string, unknown>) => {
-      const row = { provider: String(r.provider), model: String(r.model ?? ''), unit: String(r.unit), quantity: n(r.quantity) }
+      const row = { provider: String(r.provider), model: String(r.model ?? ''), unit: String(r.unit), quantity: n(r.quantity), day }
       const { line, inr } = this.price(model, row)
       return { ...row, engine: r.engine, kind: r.kind, label: line?.label ?? null, unitLabel: UNIT_LABEL[row.unit] ?? row.unit, costInr: inr, priced: !!line }
     })
@@ -295,7 +321,7 @@ class CostService {
   /** Computed cost per provider per IST month vs what Finance entered from the bills. */
   async reconciliation(months: number) {
     const model = await costModelStore.get()
-    const rates = perMinuteInr(model)
+    const ratesOn = this.ratesByDay(model)
     const now = new Date(Date.now() + 19_800_000)
     const monthList = Array.from({ length: months }, (_, i) => {
       const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1))
@@ -308,8 +334,8 @@ class CostService {
         ? conn()
             .from(USAGE)
             .where('created_at', '>=', from)
-            .groupByRaw('DATE_FORMAT(created_at, "%Y-%m"), provider, model, unit')
-            .select(conn().raw('DATE_FORMAT(created_at, "%Y-%m") as month'), 'provider', 'model', 'unit')
+            .groupByRaw('DATE_FORMAT(created_at, "%Y-%m-%d"), provider, model, unit')
+            .select(conn().raw('DATE_FORMAT(created_at, "%Y-%m-%d") as day'), 'provider', 'model', 'unit')
             .sum('quantity as quantity')
         : Promise.resolve([]),
       conn()
@@ -317,8 +343,8 @@ class CostService {
         .leftJoin('ai_tutor_session_summaries as s', 's.ai_tutor_chat_id', 'c.id')
         .where('c.created_at', '>=', from)
         .if(recorded, (q) => q.whereNotExists((sub) => sub.from(USAGE).whereRaw(`${USAGE}.ai_tutor_chat_id = c.id`)))
-        .groupByRaw('DATE_FORMAT(c.created_at, "%Y-%m"), s.language')
-        .select(conn().raw('DATE_FORMAT(c.created_at, "%Y-%m") as month'), 's.language')
+        .groupByRaw('DATE_FORMAT(c.created_at, "%Y-%m-%d"), s.language')
+        .select(conn().raw('DATE_FORMAT(c.created_at, "%Y-%m-%d") as day'), 's.language')
         .sum('c.time_spent as minutes'),
       db.from('console_cost_invoices').where('month', '>=', monthList[monthList.length - 1]).select('month', 'provider', 'amount_inr', 'note'),
     ])
@@ -330,14 +356,16 @@ class CostService {
       return cur
     }
     for (const u of usage) {
-      const { inr } = this.price(model, { provider: u.provider, model: u.model ?? '', unit: u.unit, quantity: n(u.quantity) })
-      cell(u.month, PROVIDERS.includes(u.provider) ? u.provider : 'other').exactInr += inr
+      const day = String(u.day)
+      const { inr } = this.price(model, { provider: u.provider, model: u.model ?? '', unit: u.unit, quantity: n(u.quantity), day })
+      cell(day.slice(0, 7), PROVIDERS.includes(u.provider) ? u.provider : 'other').exactInr += inr
     }
     for (const c of uncovered) {
+      const day = String(c.day)
       const engine = estimateEngine(c.language, model.defaultEngine)
-      for (const part of rates[engine].parts) {
-        const line = model.prices.find((p) => p.id === part.priceId)
-        if (line) cell(c.month, PROVIDERS.includes(line.provider) ? line.provider : 'other').estimatedInr += n(c.minutes) * part.inr
+      for (const part of ratesOn(day)[engine].parts) {
+        const line = model.prices.find((p) => p.id === part.lineId)
+        if (line) cell(day.slice(0, 7), PROVIDERS.includes(line.provider) ? line.provider : 'other').estimatedInr += n(c.minutes) * part.inr
       }
     }
     return monthList.flatMap((month) =>

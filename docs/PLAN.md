@@ -253,7 +253,9 @@ re-read on every request, so a role change applies at once.
 - Every write, every sensitive read and every refused attempt goes to the audit log, with
   who, when, IP, user agent, request id, and **why** (a reason is mandatory).
 - The log is append-only and **hash-chained**. "Verify integrity" proves no row was edited
-  or deleted, and the production DB grants stop even the console from rewriting it.
+  or deleted, and the production DB grants stop even the console from rewriting it. Decimals in
+  an entry's details are stored to 15 significant digits: MySQL's JSON type alters about 9% of
+  17-digit decimals, which would make genuine entries (e.g. a price-list save) look tampered with.
 
 **Personal data (DPDP Act 2023)**
 
@@ -311,8 +313,8 @@ class actually used and the console prices it; see [`AI_USAGE_SPEC.md`](AI_USAGE
 | Part | Owner | Status |
 |---|---|---|
 | Per-job usage accumulator, sent with every `session/save` + a final `session/usage` after the reflection | agent (`class-telemetry.js`) | **done** (verified on all three engines, 2026-10-23) |
-| `ai_tutor_session_usage` table + `usage` field on `session/save` | tutor API | **done locally**; not yet on production |
-| Pricing, Cost page, per-class cost, calibration, reconciliation | console | **done**; per-class cost matches the price list to ₹0.0001 on all three engines |
+| `ai_tutor_session_usage` table + `usage` field on `session/save` | tutor API | migration recorded as applied on production (2026-10-23); rows arriving there **not yet confirmed** |
+| Pricing, Cost page, per-class cost, calibration, reconciliation | console | **done**; per-class cost matches a hand calculation to ₹0.0001 (re-checked 2026-10-29 at the corrected prices) |
 
 **What is recorded per class** (cumulative per LiveKit job, so retries never double count):
 Sarvam STT audio seconds · Sarvam Bulbul characters · Gemini LLM input / cached input / output
@@ -320,17 +322,33 @@ tokens · Gemini TTS characters and audio seconds · Gemini native-audio audio/t
 memory-model tokens (running notes + end-of-class reflection) · LiveKit participant seconds.
 Quantities only: prices live in the console, so a price change never needs an agent release.
 
-**Price list** (editable by Finance, every change audited with before/after ₹ per minute):
+**Price list** (editable by Finance, every change audited with before/after ₹ per minute).
+Checked against the providers' pages on 28 Oct 2026; USD at ₹95.20 (Wise mid-market):
 
 | Service | Price | Source |
 |---|---|---|
-| Sarvam speech-to-text | ₹30 per audio hour, per second | [Sarvam](https://sarvam.ai/api-pricing) |
-| Sarvam Bulbul v3 TTS | ₹30 per 10K characters (v2: ₹15) | [Sarvam](https://sarvam.ai/api-pricing) |
-| Gemini 3.1 Flash-Lite | $0.25 in / $0.025 cached / $1.50 out per 1M tokens | third-party, confirm |
-| Gemini 3.5 Flash (memory) | $1.50 in / $0.15 cached / $9.00 out per 1M tokens | third-party, confirm |
-| Gemini Flash-Lite TTS | $0.50 per 1M text tokens; $9 per 1M audio tokens (introductory) | third-party, confirm |
-| Gemini native audio | $3 audio in / $12 audio out per 1M tokens | third-party, confirm |
-| LiveKit | $0.0005 per participant-minute (Ship); 0 if self-hosted | [LiveKit](https://livekit.io/pricing) |
+| Sarvam speech-to-text (real-time) | ₹0.49 per audio minute (pay-as-you-go; ₹0.38–0.45 on paid plans) | [Sarvam](https://www.sarvam.ai/api-pricing) |
+| Sarvam Bulbul v4 Flash TTS (the tutor's voice since 25 Oct 2026) | ₹1.00 per 1,000 characters | [Sarvam](https://www.sarvam.ai/api-pricing) |
+| Sarvam Bulbul v3 TTS | ₹3.00 per 1,000 characters (v2: last known ₹15 per 10K, no longer listed) | [Sarvam](https://www.sarvam.ai/api-pricing) |
+| Gemini 3.1 Flash-Lite (tutor LLM, running notes) | $0.25 in / $0.025 cached / $1.50 out per 1M tokens | [Google](https://ai.google.dev/gemini-api/docs/pricing) |
+| Gemini 3.5 Flash (end-of-class reflection) | $1.50 in / $0.15 cached / $9.00 out per 1M tokens: **unverified**, the model is no longer on Google's page | last known |
+| Gemini 3.8 Flash-Lite TTS | $0.50 per 1M text tokens, $0.0015 per 10 s audio; **both double from 1 Jan 2027** (dated lines) | [Google](https://ai.google.dev/gemini-api/docs/pricing) |
+| Gemini 2.5 Flash native audio | $3 audio in / $0.50 text in / $12 audio out / $2 text out per 1M tokens | [Google](https://ai.google.dev/gemini-api/docs/pricing) |
+| LiveKit | $0.0005 per WebRTC minute (Ship overage); agent session minutes don't apply (self-hosted agent) | [LiveKit](https://livekit.com/pricing) |
+
+**Keeping prices right** (best practice for cost accounting):
+
+- **Effective dates.** A price line may carry `from` (IST day). Each class is priced at the
+  rate in force on its day, so a price change never rewrites past months, and a known future
+  change (Gemini TTS on 1 Jan 2027) is entered once, ahead of time.
+- **New models are never ₹0.** A saved price list gets every default line it lacks (a new
+  voice, a new LLM) and keeps Finance's own values; usage still without a price is flagged.
+- **Official prices move in code, with a date.** When the defaults were re-checked after the
+  saved list, the Cost page says so and offers **Use latest prices** (default lines and the USD
+  rate refresh; Finance's own lines, estimates and fixed costs stay; audited).
+- **Monthly**: Finance enters the Sarvam / Google / LiveKit bills (reconciliation); a gap over
+  15% means a quantity or a price is off. Re-check the price pages and the USD rate at least
+  monthly and whenever the tutor changes a model.
 
 **Cost & margin page**: coverage (share of minutes priced exactly), total / exact / estimated,
 cost per minute, per class (average, median, p90), per learner, revenue from minutes sold and
@@ -342,8 +360,8 @@ Sarvam has no usage API, only an organisation-wide balance); usage without a pri
 and counts ₹0 until priced. Each class page shows that class's usage and cost.
 
 Classes with no usage record (older classes, a lost save) are **estimated** from minutes ×
-per-minute assumptions per engine (≈ ₹2.4/min Sarvam, of which Bulbul TTS ₹1.35 and STT ₹0.50; ≈ ₹1.8/min global;
-≈ ₹2.5/min native audio, with the default assumptions) and labelled as estimates everywhere.
+per-minute assumptions per engine (≈ ₹1.49/min Sarvam, of which STT ₹0.49 and Bulbul v4 TTS ₹0.45; ≈ ₹1.48/min global;
+≈ ₹2.65/min native audio, with the default assumptions and prices of 28 Oct 2026) and labelled as estimates everywhere.
 
 ---
 

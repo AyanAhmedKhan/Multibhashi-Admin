@@ -19,11 +19,14 @@ export interface PriceLine {
   price: number
   currency: 'INR' | 'USD'
   per: number
+  /** First IST day (YYYY-MM-DD) the price applies; absent = since always. */
+  from?: string
   source?: string
   note?: string
 }
 export interface CostModel {
   v: 2
+  basedOn?: string
   usdToInr: number
   pricePerPaidMinuteInr: number
   defaultEngine: Engine
@@ -69,6 +72,8 @@ interface CostInsights {
   calibration: { engine: Engine; priceId: string; label: string; unit: string; assumed: number; measured: number; basisMinutes: number }[]
   series: { day: string; exactInr: number; estimatedInr: number; costInr: number }[]
   model: CostModel
+  modelStatus: { basedOn: string | null; latestCheckedOn: string; outdated: boolean }
+  latestModel: CostModel | null
 }
 interface ReconRow {
   month: string
@@ -135,6 +140,19 @@ export function CostTab({ days }: { days: number }) {
         <div className="rounded-lg border border-border bg-success-soft px-3 py-2 text-sm text-success">
           <b>Exact for {d.coverage.minutesShare}% of minutes</b> ({fmtInt(d.coverage.classes)} of {fmtInt(d.classes)} classes): recorded usage × the price list.
           {d.coverage.minutesShare < 100 && ' The rest (classes without a usage record) is estimated and labelled.'}
+        </div>
+      )}
+      {d.modelStatus.outdated && d.latestModel && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-warning-soft px-3 py-2 text-sm text-warning">
+          <span>
+            <b>Newer official prices.</b> Sarvam, Google and LiveKit prices and the USD rate were re-checked on {fmtDay(d.modelStatus.latestCheckedOn)}; the saved price list
+            {d.modelStatus.basedOn ? ` is from ${fmtDay(d.modelStatus.basedOn)}` : ' predates that'}. Your own lines, estimates and fixed costs stay as they are.
+          </span>
+          {manage && (
+            <Button size="sm" variant="primary" onClick={() => saveModel(d.latestModel!, 'Use the latest official prices')}>
+              Use latest prices
+            </Button>
+          )}
         </div>
       )}
       {unpriced.length > 0 && (
@@ -323,6 +341,7 @@ export function CostTab({ days }: { days: number }) {
             <tr key={p.id}>
               <Td>
                 {p.label}
+                {p.from && <Badge tone="blue">from {fmtDay(p.from)}</Badge>}
                 {p.note && <div className="max-w-sm text-xs text-muted-foreground">{p.note}</div>}
               </Td>
               <Td className="text-xs text-ink-2">{p.provider} · {p.model === '*' ? 'any model' : p.model} · {p.unit}</Td>
@@ -391,6 +410,7 @@ function AddPrice({ draft, onClose, onSave }: { draft: Partial<PriceLine>; onClo
                 price: Number(line.price),
                 currency: line.currency ?? 'USD',
                 per: Number(line.per),
+                ...(line.from ? { from: line.from } : {}),
               })
             }
           >
@@ -417,6 +437,9 @@ function AddPrice({ draft, onClose, onSave }: { draft: Partial<PriceLine>; onClo
         </Field>
         <Field label="Per (units)">{(id) => <Input id={id} type="number" value={line.per ?? 1} onChange={(e) => set({ per: Number(e.target.value) })} />}</Field>
       </div>
+      <Field label="Applies from (optional)" hint="For a price change: classes before this day keep the current price. Leave empty for a new service.">
+        {(id) => <Input id={id} type="date" value={line.from ?? ''} onChange={(e) => set({ from: e.target.value || undefined })} />}
+      </Field>
     </Modal>
   )
 }
@@ -452,7 +475,7 @@ function ModelEditor({ mode, model, onClose, onSave }: { mode: 'prices' | 'assum
               <div key={p.id} className="grid items-end gap-2 rounded-lg border border-border p-2 sm:grid-cols-[1fr_6rem_6rem_auto]">
                 <div className="text-sm">
                   {p.label}
-                  <div className="text-xs text-muted-foreground">{p.provider} · {p.model} · {p.unit} · {p.currency}</div>
+                  <div className="text-xs text-muted-foreground">{p.provider} · {p.model} · {p.unit} · {p.currency}{p.from ? ` · from ${p.from}` : ''}</div>
                 </div>
                 <Field label="Price">{(id) => <Input id={id} type="number" step="any" value={p.price} onChange={(e) => update((m) => (m.prices[i].price = Number(e.target.value)))} />}</Field>
                 <Field label="Per">{(id) => <Input id={id} type="number" value={p.per} onChange={(e) => update((m) => (m.prices[i].per = Number(e.target.value)))} />}</Field>

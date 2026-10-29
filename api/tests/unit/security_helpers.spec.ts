@@ -3,6 +3,7 @@ import { base32Decode, base32Encode, hotp, otpauthUri, verifyTotp } from '#helpe
 import { maskEmail, maskName, maskPhone } from '#helpers/mask'
 import { passwordProblem } from '#helpers/password_policy'
 import { normaliseRecoveryCode, recoveryCode, safeEqual } from '#helpers/tokens'
+import { stableNumbers } from '#services/audit_service'
 
 // RFC 6238 appendix B test secret (ASCII "12345678901234567890"), SHA-1, 8 digits there;
 // the 6-digit codes below are the same values mod 10^6.
@@ -89,5 +90,18 @@ test.group('Tokens', () => {
     assert.isTrue(safeEqual('abc', 'abc'))
     assert.isFalse(safeEqual('abc', 'abd'))
     assert.isFalse(safeEqual('abc', 'abcd'))
+  })
+})
+
+test.group('Audit log details', () => {
+  test('long decimals are rounded to 15 digits so MySQL JSON returns them unchanged', ({ assert }) => {
+    assert.deepEqual(stableNumbers({ a: 1.4936000000000003, b: [0.1 + 0.2, 7], c: 'x', d: null, e: { f: 100 / 30 } }), {
+      a: 1.4936,
+      b: [0.3, 7],
+      c: 'x',
+      d: null,
+      e: { f: 3.33333333333333 },
+    })
+    assert.equal(stableNumbers(12345678901234567), 12345678901234567, 'integers stay exact')
   })
 })
