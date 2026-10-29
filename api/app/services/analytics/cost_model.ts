@@ -53,11 +53,12 @@ export interface CostModel {
 }
 
 const SARVAM = 'https://www.sarvam.ai/api-pricing'
+const SARVAM_V4 = 'https://www.sarvam.ai/blogs/bulbul-v4-flash/'
 const LIVEKIT = 'https://livekit.com/pricing'
 const GEMINI = 'https://ai.google.dev/gemini-api/docs/pricing'
 const REALTIME_MODEL = 'gemini-2.5-flash-native-audio-preview-12-2025'
 /** Prices checked against the providers' pages on this day; USD at the Wise mid-market rate. */
-const CHECKED_ON = '2026-10-28'
+const CHECKED_ON = '2026-10-29'
 
 /** Human units for quantities (audio hours, characters, tokens…). */
 export const UNIT_LABEL: Record<string, string> = {
@@ -75,7 +76,7 @@ export const UNIT_LABEL: Record<string, string> = {
 }
 
 const MEM_UNVERIFIED =
-  'gemini-3.5-flash is no longer on Google’s price page (checked 28 Oct 2026), so this price can’t be verified. The listed Gemini 3.6 Flash costs $0.75 in / $0.075 cached / $3.75 out per 1M tokens (doubling on 1 Jan 2027)'
+  'gemini-3.5-flash is no longer on Google’s price page (checked 29 Oct 2026), so this price can’t be verified. The listed Gemini 3.6 Flash costs $0.75 in / $0.075 cached / $3.75 out per 1M tokens (doubling on 1 Jan 2027)'
 
 export const DEFAULT_COST_MODEL: CostModel = {
   v: 2,
@@ -86,7 +87,7 @@ export const DEFAULT_COST_MODEL: CostModel = {
   checkedOn: CHECKED_ON,
   prices: [
     { id: 'sarvam-stt', label: 'Sarvam speech-to-text (real-time)', provider: 'sarvam', model: '*', unit: 'audio_seconds', price: 0.49, currency: 'INR', per: 60, source: SARVAM, note: '₹0.49 per audio minute, pay-as-you-go (₹0.45 Pro, ₹0.41 Growth, ₹0.38 Business), billed by audio duration. Counted as streamed, silence padding included. Push-to-talk classes stream the whole class (≈ 60 s per class minute); voice mode sends speech only' },
-    { id: 'sarvam-tts-v4-flash', label: 'Sarvam Bulbul v4 Flash text-to-speech', provider: 'sarvam', model: 'bulbul:v4-flash', unit: 'characters', price: 1, currency: 'INR', per: 1000, source: SARVAM, note: '₹1.00 per 1,000 characters, pay-as-you-go (₹0.80 on Business). The voice of the AI tutor since 25 Oct 2026 (Zarina)' },
+    { id: 'sarvam-tts-v4-flash', label: 'Sarvam Bulbul v4 Flash text-to-speech', provider: 'sarvam', model: 'bulbul:v4-flash', unit: 'characters', price: 2, currency: 'INR', per: 1000, source: SARVAM_V4, note: 'Standard pay-as-you-go price: ₹20 per 10,000 characters (₹2.00 per 1,000). Sarvam’s launch offer (half price through 12 Nov 2026) is deliberately not applied. The voice of the AI tutor since 25 Oct 2026 (Zarina)' },
     { id: 'sarvam-tts-v3', label: 'Sarvam Bulbul v3 text-to-speech', provider: 'sarvam', model: 'bulbul:v3', unit: 'characters', price: 3, currency: 'INR', per: 1000, source: SARVAM, note: '₹3.00 per 1,000 characters, pay-as-you-go' },
     { id: 'sarvam-tts-v2', label: 'Sarvam Bulbul v2 text-to-speech', provider: 'sarvam', model: 'bulbul:v2', unit: 'characters', price: 15, currency: 'INR', per: 10_000, source: SARVAM, note: 'No longer on Sarvam’s price page; last known price' },
     { id: 'llm-in', label: 'Gemini 3.1 Flash-Lite input', provider: 'google', model: 'gemini-3.1-flash-lite', unit: 'input_tokens', price: 0.25, currency: 'USD', per: 1_000_000, source: GEMINI, note: 'Text input, Standard tier. Also prices the memory layer’s running notes (same model)' },

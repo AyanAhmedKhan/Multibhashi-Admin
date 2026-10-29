@@ -323,12 +323,12 @@ memory-model tokens (running notes + end-of-class reflection) · LiveKit partici
 Quantities only: prices live in the console, so a price change never needs an agent release.
 
 **Price list** (editable by Finance, every change audited with before/after ₹ per minute).
-Checked against the providers' pages on 28 Oct 2026; USD at ₹95.20 (Wise mid-market):
+Checked against the providers' pages on 28–29 Oct 2026; USD at ₹95.20 (Wise mid-market):
 
 | Service | Price | Source |
 |---|---|---|
 | Sarvam speech-to-text (real-time) | ₹0.49 per audio minute (pay-as-you-go; ₹0.38–0.45 on paid plans) | [Sarvam](https://www.sarvam.ai/api-pricing) |
-| Sarvam Bulbul v4 Flash TTS (the tutor's voice since 25 Oct 2026) | ₹1.00 per 1,000 characters | [Sarvam](https://www.sarvam.ai/api-pricing) |
+| Sarvam Bulbul v4 Flash TTS (the tutor's voice since 25 Oct 2026) | ₹20 per 10,000 characters (₹2.00 per 1,000), the standard pay-as-you-go price. The half-price launch offer (through 12 Nov 2026) is deliberately not applied | [Sarvam](https://www.sarvam.ai/blogs/bulbul-v4-flash/) |
 | Sarvam Bulbul v3 TTS | ₹3.00 per 1,000 characters (v2: last known ₹15 per 10K, no longer listed) | [Sarvam](https://www.sarvam.ai/api-pricing) |
 | Gemini 3.1 Flash-Lite (tutor LLM, running notes) | $0.25 in / $0.025 cached / $1.50 out per 1M tokens | [Google](https://ai.google.dev/gemini-api/docs/pricing) |
 | Gemini 3.5 Flash (end-of-class reflection) | $1.50 in / $0.15 cached / $9.00 out per 1M tokens: **unverified**, the model is no longer on Google's page | last known |
@@ -360,8 +360,8 @@ Sarvam has no usage API, only an organisation-wide balance); usage without a pri
 and counts ₹0 until priced. Each class page shows that class's usage and cost.
 
 Classes with no usage record (older classes, a lost save) are **estimated** from minutes ×
-per-minute assumptions per engine (≈ ₹1.49/min Sarvam, of which STT ₹0.49 and Bulbul v4 TTS ₹0.45; ≈ ₹1.48/min global;
-≈ ₹2.65/min native audio, with the default assumptions and prices of 28 Oct 2026) and labelled as estimates everywhere.
+per-minute assumptions per engine (≈ ₹1.94/min Sarvam, of which STT ₹0.49 and Bulbul v4 TTS ₹0.90; ≈ ₹1.48/min global;
+≈ ₹2.65/min native audio, with the default assumptions and prices of 29 Oct 2026) and labelled as estimates everywhere.
 
 ---
 

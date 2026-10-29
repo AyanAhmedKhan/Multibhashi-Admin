@@ -35,11 +35,12 @@ test.group('Cost model', () => {
     assert.isNull(priceFor(m, 'openai', 'gpt', 'input_tokens'))
   })
 
-  test('official prices (checked 28 Oct 2026): Sarvam per minute and per 1,000 characters', ({ assert }) => {
+  test('official prices (checked 29 Oct 2026): Sarvam per minute and per 1,000 characters', ({ assert }) => {
     const m = clone()
     const inr = (provider: string, model: string, unit: string, qty: number) => unitPriceInr(priceFor(m, provider, model, unit, '2026-10-28')!, m.usdToInr) * qty
     assert.closeTo(inr('sarvam', 'saaras:v3-realtime', 'audio_seconds', 60), 0.49, 1e-9)
-    assert.closeTo(inr('sarvam', 'bulbul:v4-flash', 'characters', 1000), 1, 1e-9)
+    assert.closeTo(inr('sarvam', 'bulbul:v4-flash', 'characters', 1000), 2, 1e-9) // standard price, not the launch offer
+    assert.closeTo(inr('sarvam', 'bulbul:v4-flash', 'characters', 10_000), 20, 1e-9)
     assert.closeTo(inr('sarvam', 'bulbul:v3', 'characters', 1000), 3, 1e-9)
     // Gemini TTS audio: Google's own "$0.0015 per 10 s"
     assert.closeTo(priceFor(m, 'google', 'gemini-3.8-flash-lite-tts', 'output_audio_seconds', '2026-10-28')!.price / 1000 * 10, 0.0015, 1e-12)
