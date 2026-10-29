@@ -9,11 +9,21 @@ import { UsersTab } from './UsersTab'
 import { EngagementTab } from './EngagementTab'
 import { TutorTab } from './TutorTab'
 import { CostTab } from './CostTab'
+import { QuizzesTab } from './QuizzesTab'
 
 export function useDays() {
   const [params, setParams] = useSearchParams()
   const days = Number(params.get('days') ?? 30)
-  return [days, (d: number) => setParams({ days: String(d) })] as const
+  // Keeps the other parameters (e.g. the Cost tab's section) when the period changes.
+  return [
+    days,
+    (d: number) =>
+      setParams((prev) => {
+        const next = new URLSearchParams(prev)
+        next.set('days', String(d))
+        return next
+      }),
+  ] as const
 }
 
 function Highlights() {
@@ -48,6 +58,7 @@ export function InsightsPage() {
     { key: 'users', label: 'Users & growth', show: true, node: <UsersTab days={days} /> },
     { key: 'engagement', label: 'Screens & content', show: true, node: <EngagementTab days={days} /> },
     { key: 'ai', label: 'AI tutor usage', show: true, node: <TutorTab days={days} /> },
+    { key: 'quizzes', label: 'Quizzes', show: true, node: <QuizzesTab days={days} /> },
     { key: 'cost', label: 'Cost & margin', show: can('analytics.cost.read'), node: <CostTab days={days} /> },
   ]
   const current = tabs.find((t) => t.key === tab && t.show) ?? tabs[0]
@@ -55,7 +66,7 @@ export function InsightsPage() {
     <>
       <PageHeader
         title="Insights"
-        subtitle="Aggregates across all learners (no personal data). IST days. Data from the app’s activity tracking and the AI tutor."
+        subtitle="Aggregates across all learners (no personal data). IST days. Data from the app’s activity tracking, quiz answers and the AI tutor."
         actions={
           <Select aria-label="Period" className="w-40" value={String(days)} onChange={(e) => setDays(Number(e.target.value))}>
             <option value="7">Last 7 days</option>

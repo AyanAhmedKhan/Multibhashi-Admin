@@ -51,6 +51,14 @@ export function humanAction(action: string) {
 export const inr = (v: number | null | undefined, digits = 0) =>
   v === null || v === undefined ? '—' : `₹${v.toLocaleString('en-IN', { minimumFractionDigits: digits, maximumFractionDigits: digits })}`
 
+/** Rupees for small per-item costs: paise-level precision below ₹1 (₹0.042), whole rupees above ₹100. */
+export function inrSmall(v: number | null | undefined) {
+  if (v === null || v === undefined || !Number.isFinite(v)) return '—'
+  if (v === 0) return '₹0'
+  const a = Math.abs(v)
+  return a < 0.01 ? `₹${v.toFixed(4)}` : a < 1 ? `₹${v.toFixed(3)}` : a < 100 ? inr(v, 2) : inr(v)
+}
+
 /** Quantities in the unit people think in: audio hours, minutes, K/M characters and tokens. */
 export function fmtQuantity(quantity: number, unit: string) {
   if (unit === 'audio_seconds' || unit === 'output_audio_seconds') {

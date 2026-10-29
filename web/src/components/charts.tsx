@@ -1,5 +1,5 @@
-import { useState, type ReactNode } from 'react'
-import { Area, AreaChart, Bar, BarChart, CartesianGrid, XAxis, YAxis } from 'recharts'
+import { useId, useState, type ReactNode } from 'react'
+import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, XAxis, YAxis } from 'recharts'
 import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from '@/components/ui/chart'
 import { Button, Card, Table, Td } from './ui'
 
@@ -100,16 +100,61 @@ function Tip({ xFormat, yFormat, label }: { xFormat?: (v: string) => string; yFo
   )
 }
 
-export function Bars<T extends object>({ data, x, y, label, xFormat, yFormat = (v) => v.toLocaleString('en-IN'), height = 240 }: SeriesProps<T>) {
-  const rows = data.map((d) => ({ x: String((d as Record<string, unknown>)[x]), value: Number((d as Record<string, unknown>)[y]) }))
+export function Bars<T extends object>({
+  data,
+  x,
+  y,
+  label,
+  xFormat,
+  yFormat = (v) => v.toLocaleString('en-IN'),
+  height = 240,
+  hatched,
+  hatchedLabel = 'estimated',
+  yDecimals = false,
+}: SeriesProps<T> & {
+  /** Rows where this key is true are drawn with a diagonal texture (same hue), e.g. estimated days. */
+  hatched?: keyof T & string
+  hatchedLabel?: string
+  yDecimals?: boolean
+}) {
+  const patternId = useId().replace(/:/g, '')
+  const rows = data.map((d) => ({
+    x: String((d as Record<string, unknown>)[x]),
+    value: Number((d as Record<string, unknown>)[y]),
+    hatched: hatched ? !!(d as Record<string, unknown>)[hatched] : false,
+  }))
+  const tipFormat = (v: number, row?: { hatched?: boolean }) => `${yFormat(v)}${row?.hatched ? ` (${hatchedLabel})` : ''}`
   return (
     <ChartContainer config={config(label)} className="w-full" style={{ height }}>
       <BarChart data={rows} margin={{ top: 8, right: 4, bottom: 0, left: -12 }} accessibilityLayer>
+        {hatched && (
+          <defs>
+            <pattern id={patternId} width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+              <rect width="6" height="6" fill="var(--card)" />
+              <rect width="3" height="6" fill="var(--color-value)" />
+            </pattern>
+          </defs>
+        )}
         <CartesianGrid vertical={false} stroke="var(--chart-grid)" />
         <XAxis dataKey="x" tickFormatter={xFormat} tickLine={false} axisLine={false} tickMargin={8} minTickGap={16} />
-        <YAxis allowDecimals={false} tickLine={false} axisLine={false} tickFormatter={compact} width={44} />
-        <Tip xFormat={xFormat} yFormat={yFormat} label={label} />
-        <Bar dataKey="value" fill="var(--color-value)" maxBarSize={24} radius={[4, 4, 0, 0]} isAnimationActive={false} />
+        <YAxis allowDecimals={yDecimals} tickLine={false} axisLine={false} tickFormatter={compact} width={44} />
+        <ChartTooltip
+          cursor={{ fill: 'var(--muted)' }}
+          content={
+            <ChartTooltipContent
+              labelFormatter={(value) => (xFormat ? xFormat(String(value)) : String(value))}
+              formatter={(value, _name, item) => (
+                <span className="tabular font-medium text-foreground">
+                  {tipFormat(Number(value), item?.payload as { hatched?: boolean })} {label}
+                </span>
+              )}
+            />
+          }
+        />
+        <Bar dataKey="value" fill="var(--color-value)" maxBarSize={24} radius={[4, 4, 0, 0]} isAnimationActive={false}>
+          {hatched &&
+            rows.map((r, i) => <Cell key={i} fill={r.hatched ? `url(#${patternId})` : 'var(--color-value)'} stroke={r.hatched ? 'var(--color-value)' : undefined} strokeWidth={r.hatched ? 1 : 0} />)}
+        </Bar>
       </BarChart>
     </ChartContainer>
   )
