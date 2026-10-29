@@ -124,6 +124,7 @@ router
         router.get('insights/engagement', [InsightsController, 'engagement']).use(middleware.can(['analytics.read']))
         router.get('insights/tutor', [InsightsController, 'tutor']).use(middleware.can(['analytics.read']))
         router.get('insights/highlights', [InsightsController, 'highlights']).use(middleware.can(['analytics.read']))
+        router.get('insights/quizzes', [InsightsController, 'quizzes']).use(middleware.can(['analytics.read']))
         router.get('insights/staff', [InsightsController, 'staff']).use(middleware.can(['console.audit.read']))
         router.get('insights/cost', [InsightsController, 'cost']).use(middleware.can(['analytics.cost.read']))
         router.get('insights/cost-model', [InsightsController, 'costModel']).use(middleware.can(['analytics.cost.read']))

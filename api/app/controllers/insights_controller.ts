@@ -5,6 +5,7 @@ import costService from '#services/analytics/cost_service'
 import { DEFAULT_COST_MODEL, costModelStore, perMinuteInr, validateCostModel } from '#services/analytics/cost_model'
 import auditService from '#services/audit_service'
 import providerSync from '#services/analytics/provider_sync'
+import quizAnalytics from '#services/analytics/quiz_analytics'
 import { costModelValidator, invoiceValidator, listValidator, providerRefreshValidator } from '#validators/console'
 
 /** Insights: users, engagement, AI tutor usage, cost. Aggregates only. */
@@ -24,6 +25,11 @@ export default class InsightsController {
 
   async tutor({ request }: HttpContext) {
     return analyticsService.tutor(await this.days(request))
+  }
+
+  /** Quizzes: Speaking/Writing volume, marking behaviour and learner experience. */
+  async quizzes({ request }: HttpContext) {
+    return quizAnalytics.insights(await this.days(request))
   }
 
   async highlights() {
