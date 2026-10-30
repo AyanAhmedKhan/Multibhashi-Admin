@@ -17,7 +17,11 @@ import { istDayLabel, istDayOf, istDayStart } from '#helpers/ist'
  * Queries run on the `analytics` connection and are cached briefly.
  */
 
-const CACHE_MS = 120_000
+// The answer query reads every Speaking/Writing answer in the period from the live
+// database (production, 2026-10-30: ~153k answers in 30 days in user_quiz_log_details;
+// counting them alone took 1.6 s). Thirty minutes keeps staff page views from
+// re-running it; the figures are daily anyway.
+const CACHE_MS = 30 * 60_000
 const SCHEMA_MS = 60_000
 const conn = () => db.connection('analytics')
 const n = (v: unknown) => Number(v ?? 0)
@@ -195,19 +199,32 @@ export interface QuizEvent {
 
 class QuizAnalytics {
   #cache = new Map<string, { at: number; value: unknown }>()
+  #inFlight = new Map<string, Promise<unknown>>()
   #schema: { at: number; value: QuizSchema } | null = null
 
+  // Concurrent misses (Cost and Insights loading together) share one query.
   private async cached<T>(key: string, fn: () => Promise<T>): Promise<T> {
     const hit = this.#cache.get(key)
     if (hit && Date.now() - hit.at < CACHE_MS) return hit.value as T
-    const value = await fn()
-    this.#cache.set(key, { at: Date.now(), value })
-    if (this.#cache.size > 50) this.#cache.delete(this.#cache.keys().next().value!)
-    return value
+    const pending = this.#inFlight.get(key)
+    if (pending) return pending as Promise<T>
+    const run = (async () => {
+      try {
+        const value = await fn()
+        this.#cache.set(key, { at: Date.now(), value })
+        if (this.#cache.size > 50) this.#cache.delete(this.#cache.keys().next().value!)
+        return value
+      } finally {
+        this.#inFlight.delete(key)
+      }
+    })()
+    this.#inFlight.set(key, run)
+    return run
   }
 
   clearCache() {
     this.#cache.clear()
+    this.#inFlight.clear()
     this.#schema = null
   }
 
