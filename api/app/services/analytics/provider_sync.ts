@@ -93,7 +93,7 @@ export async function readProviderConfig(get: Get = (k) => env.get(k as never) a
   }
   const table = get('GCP_BILLING_EXPORT_TABLE')
   if (!table) missing.push('GCP_BILLING_EXPORT_TABLE')
-  else if (!validTable(table)) problem = problem ?? 'GCP_BILLING_EXPORT_TABLE must be project.dataset.gcp_billing_export_v1_…'
+  else if (!validTable(table)) problem = problem ?? 'GCP_BILLING_EXPORT_TABLE must be project.dataset.gcp_billing_export_v1_… (or gcp_billing_export_focus_…)'
   // Attribution only: not needed to connect
   const projectId = get('GCP_SPEECH_PROJECT_ID')
   return {

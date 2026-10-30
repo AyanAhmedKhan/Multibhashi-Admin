@@ -114,12 +114,42 @@ test.group('GCP billing export', () => {
     assert.equal(exportedAt, '2026-10-29T03:40:00.000Z')
   })
 
-  test('speech SKUs are matched by the names on Google’s Speech-to-Text price page, not a service name', ({ assert }) => {
+  test('speech SKUs: the price page names and the names the real export bills', ({ assert }) => {
     assert.isTrue(isSpeechSku('Any service / Recognition'))
     assert.isTrue(isSpeechSku('Any service / Speech Recognition (with data logging)'))
     assert.isTrue(isSpeechSku('Any service / Dynamic Batch Recognition'))
+    // As billed to this account (FOCUS export, checked 30 Oct 2026).
+    assert.isTrue(isSpeechSku('Cloud Speech API / Cloud Speech-to-Text Audio Length Standard'))
+    assert.isTrue(isSpeechSku('Cloud Speech API / Something renamed later'), 'the Cloud Speech API service itself')
     assert.isFalse(isSpeechSku('Any service / Standard Storage Mumbai'))
-    assert.isFalse(isSpeechSku('Recognition API / Network egress'), 'the service part is ignored')
+    assert.isFalse(isSpeechSku('Recognition API / Network egress'))
+    assert.isFalse(isSpeechSku('Cloud Text-to-Speech API / Neural2 voices'), 'text-to-speech is not speech-to-text')
+  })
+
+  test('a FOCUS-format table is read with the FOCUS columns; credits come back out of the net BilledCost', async ({ assert }) => {
+    const table = 'multibhashi-android-app.gcp_billing_immutable_016513_594D05_0EF1D5_us.gcp_billing_export_focus_016513_594D05_0EF1D5'
+    assert.isTrue(validTable(table))
+    let seen: { query: string; params?: Record<string, unknown> } | null = null
+    const reader = new BillingReader({
+      table,
+      client: {
+        query: async (options) => {
+          seen = options
+          // ₹9,292.59 net of ₹-1.00 credits at 95.6 INR/USD, as the query returns it (already in USD).
+          return [[{ usage_day: '2026-09-25', project_id: 'multibhashi-android-app', service: 'Cloud Speech API', sku: 'Cloud Speech-to-Text Audio Length Standard', unit: 'seconds', quantity: 246747, cost_usd: 97.21, credits_usd: -0.01, usage_through: { value: '2026-09-25T19:00:00Z' }, exported_at: { value: '2026-09-26T03:00:00Z' } }]]
+        },
+      },
+    })
+    const result = await reader.read('2026-08-01')
+    for (const column of ['BilledCost', 'x_Credits', 'x_CurrencyConversionRate', 'x_Project.Id', 'ChargeDescription', 'ConsumedQuantity', "DATE(ChargePeriodStart, 'Asia/Kolkata')"]) {
+      assert.include(seen!.query, column)
+    }
+    assert.notInclude(seen!.query, 'usage_start_time')
+    assert.deepEqual(seen!.params, { since_day: '2026-08-01' })
+    assert.lengthOf(result.rows, 1)
+    assert.equal(result.rows[0].item, 'Cloud Speech API / Cloud Speech-to-Text Audio Length Standard')
+    assert.isTrue(isSpeechSku(result.rows[0].item))
+    assert.equal(result.dataThrough, '2026-09-25T19:00:00.000Z')
   })
 
   test('the table id is validated before it reaches SQL; the whole account is read (only the day is a parameter)', async ({ assert }) => {

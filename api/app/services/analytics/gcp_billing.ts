@@ -43,10 +43,14 @@ export function validTable(table: string) {
   return TABLE.test(table)
 }
 
-/** Speech-to-text SKUs as named on Google's Speech-to-Text price page (checked 29 Oct 2026). */
+/**
+ * Speech-to-text line items. The price page says "recognition"; the real export (checked
+ * 30 Oct 2026) bills it as service "Cloud Speech API", SKU "Cloud Speech-to-Text Audio
+ * Length Standard". Text-to-speech ("Cloud Text-to-Speech API") never matches.
+ */
 export function isSpeechSku(item: string) {
-  const sku = item.includes(' / ') ? item.slice(item.indexOf(' / ') + 3) : item
-  return /\brecognition\b/i.test(sku)
+  const { service, sku } = splitItem(item)
+  return /\brecognition\b|speech-to-text/i.test(sku) || /^cloud speech\b/i.test(service)
 }
 
 /** "Service / SKU" → its two halves. */
@@ -55,8 +59,42 @@ export function splitItem(item: string) {
   return i < 0 ? { service: item, sku: '' } : { service: item.slice(0, i), sku: item.slice(i + 3) }
 }
 
+/** The FOCUS-format export (`gcp_billing_export_focus_<BILLING_ACCOUNT_ID>`), as opposed to the standard one. */
+export function isFocusTable(table: string) {
+  return /(^|\.)gcp_billing_export_focus_[A-Za-z0-9_]+$/.test(table)
+}
+
+/**
+ * The same rows from Google's FOCUS export, which a linked dataset provides with history
+ * (the standard export starts only on the day it is enabled). Mapping, checked against the
+ * real table on 30 Oct 2026: ChargePeriodStart → day, x_Project.Id → project, ServiceName →
+ * service, ChargeDescription → SKU, ConsumedQuantity/ConsumedUnit → usage,
+ * x_CurrencyConversionRate (billing currency per USD). BilledCost is already NET of credits
+ * (ListCost − credits = BilledCost to the paisa), so gross = BilledCost − Σ x_Credits.Amount.
+ */
+function focusQuery(table: string) {
+  const rate = 'IF(x_CurrencyConversionRate IS NULL OR x_CurrencyConversionRate = 0, 1, x_CurrencyConversionRate)'
+  const credits = 'IFNULL((SELECT SUM(CAST(c.Amount AS FLOAT64)) FROM UNNEST(x_Credits) AS c), 0)'
+  return `
+SELECT
+  FORMAT_DATE('%Y-%m-%d', DATE(ChargePeriodStart, 'Asia/Kolkata')) AS usage_day,
+  IFNULL(x_Project.Id, IFNULL(SubAccountId, '${NO_PROJECT}')) AS project_id,
+  IFNULL(ServiceName, 'unknown service') AS service,
+  IFNULL(ChargeDescription, IFNULL(SkuId, 'unknown SKU')) AS sku,
+  IFNULL(ConsumedUnit, IFNULL(PricingUnit, '')) AS unit,
+  SUM(CAST(IFNULL(ConsumedQuantity, 0) AS FLOAT64)) AS quantity,
+  SUM((CAST(IFNULL(BilledCost, 0) AS FLOAT64) - ${credits}) / ${rate}) AS cost_usd,
+  SUM(${credits} / ${rate}) AS credits_usd,
+  MAX(ChargePeriodEnd) AS usage_through,
+  MAX(x_ExportTime) AS exported_at
+FROM \`${table}\`
+WHERE ChargePeriodStart >= TIMESTAMP(@since_day, 'Asia/Kolkata')
+GROUP BY usage_day, project_id, service, sku, unit`
+}
+
 export function billingQuery(table: string) {
-  if (!validTable(table)) throw new ProviderError('GCP_BILLING_EXPORT_TABLE must look like project.dataset.gcp_billing_export_v1_XXXXXX_XXXXXX_XXXXXX')
+  if (!validTable(table)) throw new ProviderError('GCP_BILLING_EXPORT_TABLE must look like project.dataset.gcp_billing_export_v1_XXXXXX_XXXXXX_XXXXXX (or …_focus_…)')
+  if (isFocusTable(table)) return focusQuery(table)
   const rate = 'IF(currency_conversion_rate IS NULL OR currency_conversion_rate = 0, 1, currency_conversion_rate)'
   return `
 SELECT
