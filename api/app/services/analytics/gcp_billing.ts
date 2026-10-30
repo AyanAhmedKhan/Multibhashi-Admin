@@ -120,6 +120,19 @@ const iso = (v: unknown): string | null => {
   return Number.isNaN(d.getTime()) ? null : d.toISOString()
 }
 
+const GIB = 1024 ** 3
+
+/**
+ * Storage is billed in byte-seconds and egress in bytes. A day of stored data reaches ~2e18
+ * byte-seconds on this account (checked 30 Oct 2026), past the quantity column's DECIMAL(20,4),
+ * and the whole sync failed on it. GiB-days and GiB fit easily and read better.
+ */
+export function normalizeUsage(unit: string, quantity: number): { unit: string; quantity: number } {
+  if (unit === 'byte-seconds') return { unit: 'gibibyte-days', quantity: quantity / (GIB * 86_400) }
+  if (unit === 'bytes') return { unit: 'gibibytes', quantity: quantity / GIB }
+  return { unit, quantity }
+}
+
 /** BigQuery result rows → provider rows (+ how far the export has got). */
 export function parseBillingRows(raw: Record<string, unknown>[]): BillingResult {
   const rows: ProviderRow[] = []
@@ -130,13 +143,14 @@ export function parseBillingRows(raw: Record<string, unknown>[]): BillingResult 
     if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) continue
     const service = String(r.service ?? 'unknown service')
     const sku = String(r.sku ?? 'unknown SKU')
+    const usage = normalizeUsage(String(r.unit || 'none'), num(r.quantity))
     rows.push({
       day,
       provider: 'google',
       scope: clip(String(r.project_id || NO_PROJECT), 160),
       item: clip(`${service} / ${sku}`, 255),
-      unit: clip(String(r.unit || 'none'), 48),
-      quantity: num(r.quantity),
+      unit: clip(usage.unit, 48),
+      quantity: usage.quantity,
       costUsd: num(r.cost_usd),
       creditsUsd: num(r.credits_usd),
       source: 'gcp_billing_export',

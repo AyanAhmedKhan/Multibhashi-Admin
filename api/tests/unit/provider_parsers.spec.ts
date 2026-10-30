@@ -126,6 +126,21 @@ test.group('GCP billing export', () => {
     assert.isFalse(isSpeechSku('Cloud Text-to-Speech API / Neural2 voices'), 'text-to-speech is not speech-to-text')
   })
 
+  test('storage byte-seconds and egress bytes become GiB-days and GiB, so they fit the quantity column', ({ assert }) => {
+    // The real maximum on this account, 30 Oct 2026, that overflowed DECIMAL(20,4).
+    const [stored, egress, speech] = parseBillingRows([
+      { usage_day: '2026-09-11', project_id: 'p', service: 'Cloud Storage', sku: 'Standard Storage Mumbai', unit: 'byte-seconds', quantity: 2.0521774597977907e18, cost_usd: 1, credits_usd: 0 },
+      { usage_day: '2026-09-11', project_id: 'p', service: 'Cloud Storage', sku: 'Download Worldwide', unit: 'bytes', quantity: 10763075876, cost_usd: 0, credits_usd: 0 },
+      { usage_day: '2026-09-11', project_id: 'p', service: 'Cloud Speech API', sku: 'Cloud Speech-to-Text Audio Length Standard', unit: 'seconds', quantity: 1234.5, cost_usd: 0.5, credits_usd: 0 },
+    ]).rows
+    assert.equal(stored.unit, 'gibibyte-days')
+    assert.closeTo(stored.quantity, 22120.82, 0.1)
+    assert.isBelow(stored.quantity, 1e15)
+    assert.equal(egress.unit, 'gibibytes')
+    assert.closeTo(egress.quantity, 10.02, 0.01)
+    assert.deepEqual([speech.unit, speech.quantity], ['seconds', 1234.5], 'other units are untouched')
+  })
+
   test('a FOCUS-format table is read with the FOCUS columns; credits come back out of the net BilledCost', async ({ assert }) => {
     const table = 'multibhashi-android-app.gcp_billing_immutable_016513_594D05_0EF1D5_us.gcp_billing_export_focus_016513_594D05_0EF1D5'
     assert.isTrue(validTable(table))
