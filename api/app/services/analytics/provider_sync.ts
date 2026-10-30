@@ -3,7 +3,7 @@ import db from '@adonisjs/lucid/services/db'
 import env from '#start/env'
 import { istDayLabel, istDayOf } from '#helpers/ist'
 import { OpenAiUsageClient, type FetchLike } from '#services/analytics/openai_usage'
-import { BillingReader, bigQueryClient, validTable, type BigQueryLike } from '#services/analytics/gcp_billing'
+import { BillingReader, bigQueryClient, validTables, type BigQueryLike } from '#services/analytics/gcp_billing'
 import { ProviderError, type ProviderRow } from '#services/analytics/provider_types'
 import { TUTOR_GEMINI_PROJECT, describeRules, type AttributionRules } from '#services/analytics/cost_attribution'
 
@@ -93,7 +93,7 @@ export async function readProviderConfig(get: Get = (k) => env.get(k as never) a
   }
   const table = get('GCP_BILLING_EXPORT_TABLE')
   if (!table) missing.push('GCP_BILLING_EXPORT_TABLE')
-  else if (!validTable(table)) problem = problem ?? 'GCP_BILLING_EXPORT_TABLE must be project.dataset.gcp_billing_export_v1_… (or gcp_billing_export_focus_…)'
+  else if (!validTables(table)) problem = problem ?? 'GCP_BILLING_EXPORT_TABLE must be project.dataset.gcp_billing_export_v1_… (or gcp_billing_export_focus_…), several allowed comma-separated'
   // Attribution only: not needed to connect
   const projectId = get('GCP_SPEECH_PROJECT_ID')
   return {

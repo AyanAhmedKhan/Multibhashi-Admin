@@ -1,7 +1,7 @@
 import { test } from '@japa/runner'
 import { readFile } from 'node:fs/promises'
 import { OpenAiUsageClient, parseCompletionsUsage, parseCosts, type FetchLike } from '#services/analytics/openai_usage'
-import { BillingReader, billingQuery, isSpeechSku, parseBillingRows, validTable } from '#services/analytics/gcp_billing'
+import { BillingReader, billingQuery, isSpeechSku, parseBillingRows, validTable, validTables } from '#services/analytics/gcp_billing'
 import { readProviderConfig } from '#services/analytics/provider_sync'
 import { ProviderError } from '#services/analytics/provider_types'
 
@@ -124,6 +124,40 @@ test.group('GCP billing export', () => {
     assert.isFalse(isSpeechSku('Any service / Standard Storage Mumbai'))
     assert.isFalse(isSpeechSku('Recognition API / Network egress'))
     assert.isFalse(isSpeechSku('Cloud Text-to-Speech API / Neural2 voices'), 'text-to-speech is not speech-to-text')
+  })
+
+  test('several export tables: each day comes from the most complete source; a not-yet-created table is empty', async ({ assert }) => {
+    const standard = 'multibhashi-android-app.bilin23.gcp_billing_export_v1_016513_594D05_0EF1D5'
+    const focus = 'multibhashi-android-app.gcp_billing_immutable_016513_594D05_0EF1D5_us.gcp_billing_export_focus_016513_594D05_0EF1D5'
+    assert.isTrue(validTables(`${standard}, ${focus}`))
+    assert.isFalse(validTables(`${standard}, x\`; DROP TABLE y`))
+    const day = (d: string, cost: number, sku = 'Standard Storage') => ({ usage_day: d, project_id: 'p', service: 'Cloud Storage', sku, unit: 'gibibytes', quantity: 1, cost_usd: cost, credits_usd: 0 })
+    const answer: Record<string, unknown[]> = {
+      // Standard export: enabled on the 30th, so a partial first day and a whole 31st.
+      [standard]: [day('2026-10-30', 0.4), day('2026-10-31', 5)],
+      // FOCUS: history up to and including the whole 30th.
+      [focus]: [day('2026-09-25', 3), day('2026-10-30', 4), day('2026-10-30', 1, 'Download')],
+    }
+    const queried: string[] = []
+    const reader = new BillingReader({
+      table: `${standard},${focus}`,
+      client: { query: async ({ query }) => { const t = Object.keys(answer).find((k) => query.includes(`\`${k}\``))!; queried.push(t); return [answer[t]] } },
+    })
+    const result = await reader.read('2026-09-01')
+    assert.deepEqual(queried, [standard, focus])
+    const byDay = (d: string) => result.rows.filter((r) => r.day === d)
+    assert.lengthOf(byDay('2026-09-25'), 1, 'history only FOCUS has')
+    assert.deepEqual(byDay('2026-10-30').map((r) => r.costUsd).sort(), [1, 4], 'the whole day from FOCUS, never mixed with the partial standard day')
+    assert.deepEqual(byDay('2026-10-31').map((r) => r.costUsd), [5], 'current days from the standard export')
+
+    const missing = new BillingReader({
+      table: `${standard},${focus}`,
+      client: { query: async ({ query }) => { if (query.includes('bilin23')) throw Object.assign(new Error('Not found: Table multibhashi-android-app:bilin23.gcp_billing_export_v1_016513_594D05_0EF1D5'), { code: 404 }); return [answer[focus]] } },
+    })
+    assert.lengthOf((await missing.read('2026-09-01')).rows, 3, 'the standard table not created yet: FOCUS alone')
+    const alone = new BillingReader({ table: standard, client: { query: async () => { throw Object.assign(new Error('Not found: Table x'), { code: 404 }) } } })
+    // A single missing table is still an error.
+    await assert.rejects(() => alone.read('2026-09-01'), /Not found/)
   })
 
   test('storage byte-seconds and egress bytes become GiB-days and GiB, so they fit the quantity column', ({ assert }) => {

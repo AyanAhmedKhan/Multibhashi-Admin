@@ -44,6 +44,20 @@ export function validTable(table: string) {
 }
 
 /**
+ * GCP_BILLING_EXPORT_TABLE may list several tables, comma-separated: the standard export
+ * (current, but only from the day it was enabled) and the FOCUS linked dataset (history,
+ * filling in with a lag). Each day is then taken from whichever has more of it.
+ */
+export function tablesOf(value: string) {
+  return value.split(',').map((t) => t.trim()).filter(Boolean)
+}
+
+export function validTables(value: string) {
+  const tables = tablesOf(value)
+  return tables.length > 0 && tables.every(validTable)
+}
+
+/**
  * Speech-to-text line items. The price page says "recognition"; the real export (checked
  * 30 Oct 2026) bills it as service "Cloud Speech API", SKU "Cloud Speech-to-Text Audio
  * Length Standard". Text-to-speech ("Cloud Text-to-Speech API") never matches.
@@ -163,21 +177,55 @@ export function parseBillingRows(raw: Record<string, unknown>[]): BillingResult 
   return { rows: mergeRows(rows), dataThrough, exportedAt }
 }
 
+/**
+ * Several sources of the same bill → one. For each IST day, the rows of the source whose
+ * gross cost that day is largest (the most complete copy; a day just starting in one export
+ * may be whole in the other); ties go to the source listed first. Days never mix sources.
+ */
+export function combineSources(results: BillingResult[]): BillingResult {
+  const best = new Map<string, { source: number; cost: number }>()
+  results.forEach((result, source) => {
+    const byDay = new Map<string, number>()
+    for (const row of result.rows) byDay.set(row.day, (byDay.get(row.day) ?? 0) + Math.abs(row.costUsd))
+    for (const [day, cost] of byDay) {
+      const current = best.get(day)
+      if (!current || cost > current.cost) best.set(day, { source, cost })
+    }
+  })
+  const later = (a: string | null, b: string | null) => (!a ? b : !b ? a : a > b ? a : b)
+  return {
+    rows: results.flatMap((result, source) => result.rows.filter((row) => best.get(row.day)?.source === source)),
+    dataThrough: results.reduce<string | null>((max, r) => later(max, r.dataThrough), null),
+    exportedAt: results.reduce<string | null>((max, r) => later(max, r.exportedAt), null),
+  }
+}
+
 export class BillingReader {
   constructor(private opts: BillingReaderOptions) {}
 
   /** Every project, service and SKU on the billing account since `sinceDay` (IST, YYYY-MM-DD). */
   async read(sinceDay: string): Promise<BillingResult> {
-    let result: unknown[]
-    try {
-      result = await this.opts.client.query({ query: billingQuery(this.opts.table), params: { since_day: sinceDay } })
-    } catch (error) {
-      if (error instanceof ProviderError) throw error
-      const e = error as { code?: number; message?: string }
-      throw new ProviderError(`BigQuery: ${String(e.message ?? error).slice(0, 300)}`, typeof e.code === 'number' ? e.code : null)
+    const tables = tablesOf(this.opts.table)
+    const results: BillingResult[] = []
+    for (const table of tables) {
+      let result: unknown[]
+      try {
+        result = await this.opts.client.query({ query: billingQuery(table), params: { since_day: sinceDay } })
+      } catch (error) {
+        if (error instanceof ProviderError) throw error
+        const e = error as { code?: number; message?: string }
+        // A newly enabled export has no table until its first rows land: with another
+        // source listed, that is an empty source, not a failed sync.
+        if (tables.length > 1 && (e.code === 404 || /not found: table/i.test(String(e.message ?? '')))) {
+          results.push({ rows: [], dataThrough: null, exportedAt: null })
+          continue
+        }
+        throw new ProviderError(`BigQuery: ${String(e.message ?? error).slice(0, 300)}`, typeof e.code === 'number' ? e.code : null)
+      }
+      const rows = (Array.isArray(result) && Array.isArray(result[0]) ? result[0] : []) as Record<string, unknown>[]
+      results.push(parseBillingRows(rows))
     }
-    const rows = (Array.isArray(result) && Array.isArray(result[0]) ? result[0] : []) as Record<string, unknown>[]
-    return parseBillingRows(rows)
+    return results.length === 1 ? results[0] : combineSources(results)
   }
 }
 
