@@ -97,3 +97,51 @@ appspot `_id`) to `td_user_id`. Today `users` holds no appspot id, so the only p
 would be the phone number, and appspot data isn't readable from here. The models fall back
 where they can (§3); the purchase funnel's server steps and sign-up-week cohorts fill in once
 `learner_accounts` exists.
+
+## 3. Models (MUL-151)
+
+`analytics:models [--date D | --from A --to B] [--only …] [--print]` builds the model tables for
+an IST day; the default is yesterday. The SQL is generated in
+`api/app/services/product_analytics/models.ts`, and the definitions (features, funnels) are in
+`catalog.ts`. `--print` shows the exact SQL without BigQuery.
+
+| Model | Grain | What |
+|---|---|---|
+| `m_identity_links` (helper) | anonymous_id | the user an anonymous id was later identified as (latest wins), so pre-login steps join the learner |
+| `m_user_firsts` (helper) | learner | first/last seen, first platform and channel, first feature, first value (tutor class, class joined or quiz started) |
+| `m_sessions` | session × day | start, end, duration, events, screens, entry/exit screen, platform, version |
+| `m_screen_daily` | day × screen | views, people (count and HLL sketch), median dwell and a dwell histogram, exits, top 5 previous/next screens |
+| `m_feature_daily` | day × feature | people (count and HLL), uses, sessions; `_active` = everyone, the adoption denominator |
+| `m_funnel_steps` | funnel × run start day × person | furthest step, when each step was reached, seconds between steps, platform / channel / version of the start |
+| `m_retention_weekly` | cohort week × basis × channel × first feature × week | cohort size and actives; additive, so filters sum |
+| `m_health_daily` | day × kind × name × screen × version × platform | errors, slow API calls, web vitals: count, people, p50/p75/p95, poor |
+
+**Idempotent per day.** The helpers merge with min/max. Daily tables replace the day's
+partition in one transaction. Funnels rewrite the start days their window still reaches
+(D − window − 1 … D), and retention rewrites the last 26 cohort weeks. Re-running a day gives
+the same tables. To backfill, run oldest first (`--from … --to …`).
+
+**Funnels** follow `funnel.ts` exactly:
+- A step counts only after the step before it, within the funnel's window of the run's start.
+- The latest start is kept.
+- Over a date range, a learner counts at their furthest run.
+
+In SQL, events are replicated per candidate start day, then levels of running `MAX()` window
+functions reproduce the greedy pass. A unit test runs that algorithm against `orderedFunnel()`
+on 400 random event sets.
+
+| Funnel | Steps | Window |
+|---|---|---|
+| `signup` | landing_viewed → auth_identifier_submitted → otp_requested → otp_verified → signup_completed → tutor_session_started / join_opened / quiz_started | 7 days |
+| `ai_tutor` | tutor_entry_viewed → tutor_language_selected → tutor_lesson_opened → tutor_session_started → tutor_first_turn → tutor_session_ended (minutes ≥ 5) | 1 day |
+| `live_class` | next_class_viewed → join_clicked → join_opened, scoped by `class_type` (the events carry no class id) | 1 day |
+| `quiz` | quiz_opened → quiz_started → quiz_question_answered (q_index 0) → quiz_completed | 1 day |
+| `purchase` | plans_viewed → plan_selected → checkout_opened → **server** payment captured → **server** booking created (paid, booked) | 3 days |
+
+**Opt-out.** Behavioural models (sessions, screens, features, funnels, retention) leave out
+rows with `opted_out = TRUE`. `m_health_daily` keeps them, because they are essential events
+counted in aggregate (§5).
+
+**Quality.** After a full run the command counts the day's events, sessions, screens and
+features. It fails when there are events but no sessions, and warns when there are no events.
+Each model row carries `modelled_at`. The Health tab flags a model older than 26 hours.
