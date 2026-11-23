@@ -195,12 +195,35 @@ export const SEED_RELEASES: ReleaseInput[] = [
     notes: '17–19 Nov ran at about 3× the usual Speaking answers (9.6K–12.4K a day); bulk assignment is the likely cause.',
   },
   {
+    title: 'Mobile web: remaining audit fixes (startup JS, scroll restore, notifications, phone polish)',
+    kind: 'confounder',
+    surface: 'app_web',
+    ticket: 'MUL-79, 108, 110, 113-116',
+    pr: 'RN #43',
+    commitSha: 'c72b9af',
+    // Vercel's production deployment of this commit reported success at 18:04:21 UTC
+    deployedAt: '2026-11-23T23:34:21+05:30',
+    notes: 'Not quiz-specific; can move how learners reach and resume quizzes.',
+  },
+  {
+    title: 'Activity data: app version on every session, a real quiz_completed',
+    kind: 'telemetry',
+    surface: 'app_web',
+    ticket: 'MUL-143',
+    pr: 'RN #44',
+    commitSha: '42994e1',
+    deployedAt: '2026-11-23T23:35:08+05:30',
+    notes: 'From here student_sessions.app_version is set, so app-side metrics can be split by app version.',
+  },
+  {
     title: 'Quiz events: what learners go through on Speaking and Writing questions',
     kind: 'telemetry',
     surface: 'app_web',
     pr: 'RN #45',
-    deployedAt: null,
-    notes: 'The app-side baseline starts the day this reaches learners. Set the deploy time when it ships.',
+    commitSha: 'd3335bf',
+    // Vercel production deployment of the merge, success at 18:05:27 UTC
+    deployedAt: '2026-11-23T23:35:27+05:30',
+    notes: 'The app-side baseline starts here (os, in_app, recording, submit and timeout events). Phases 1, 4 and 5 wait about 14 days of it.',
   },
 ]
 

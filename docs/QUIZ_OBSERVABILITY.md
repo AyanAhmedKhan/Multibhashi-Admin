@@ -145,7 +145,9 @@ whether that time is an estimate (a merge or commit time), the app version that 
 and the metrics it should move (`expects`: metric + up/down/flat). Insights → Quizzes shows
 the log; `analytics.releases.manage` (Super Admin, Platform Admin) edits it; every write is
 audited, and a delete asks for a reason. `quiz:seed-releases` adds the changes made before the
-log existed, with estimated times (2026-10-28 → 2026-11-16) and RN #45 as "not live yet".
+log existed: 2026-10-28 → 2026-11-16 with estimated times (merge or commit times), then RN #43,
+#44 and #45 at their Vercel production deploy times on 2026-11-23 (23:34–23:35 IST). The app-side
+baseline starts at RN #45.
 
 ### Daily metrics (`console_quiz_daily_metrics`)
 
