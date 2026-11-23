@@ -11,6 +11,8 @@ interface Engagement {
   events: { event: string; total: number; users: number }[]
   engagedSeries: { day: string; learners: number; minutesPerLearner: number }[]
   funnel: { step: string; users: number }[]
+  funnelWindowDays: number
+  funnelTruncated: boolean
   freshness: { lastRollupDay: string | null; stuckSegments: number }
 }
 
@@ -53,7 +55,11 @@ export function EngagementTab({ days }: { days: number }) {
               </li>
             ))}
           </ul>
-          <p className="mt-3 text-xs text-muted-foreground">Learners in the period who did each step and every step before it. The biggest drop is where to improve the app first.</p>
+          <p className="mt-3 text-xs text-muted-foreground">
+            Learners who did each step after the one before it, all within {d.funnelWindowDays} days of opening the app. The biggest drop is where to
+            improve the app first. “Finished a quiz” and “Talked to the AI tutor” count from the app release that sends them.
+            {d.funnelTruncated ? ' Too many events in this period: only the earliest part is counted; choose a shorter period.' : ''}
+          </p>
         </Card>
       </div>
 

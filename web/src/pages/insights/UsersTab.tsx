@@ -71,6 +71,7 @@ export function UsersTab({ days }: { days: number }) {
         </ChartCard>
         <ChartCard
           title="Sign-ups per day"
+          subtitle="New accounts that signed in at least once. An OTP request alone creates an account, so it is not counted."
           rows={d.series}
           columns={[
             { key: 'day', label: 'Day', format: (v) => fmtDay(String(v)) },
@@ -169,7 +170,7 @@ export function UsersTab({ days }: { days: number }) {
             </tbody>
           </table>
         </div>
-        <p className="px-4 py-3 text-xs text-muted-foreground">Share of each sign-up week who opened the app again N weeks later. Week 0 is the sign-up week.</p>
+        <p className="px-4 py-3 text-xs text-muted-foreground">Share of each sign-up week who opened the app again N weeks later. Week 0 is the sign-up week. Only accounts that signed in are counted.</p>
       </Card>
 
       <div className="grid gap-6 lg:grid-cols-2">
