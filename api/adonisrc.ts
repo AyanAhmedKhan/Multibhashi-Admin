@@ -25,6 +25,12 @@ export default defineConfig({
 
   preloads: [() => import('#start/routes'), () => import('#start/kernel')],
 
+  /*
+  | Non-TypeScript files the app reads at runtime, copied into the build: the product
+  | analytics BigQuery DDL (analytics:bq-setup).
+  */
+  metaFiles: [{ pattern: 'analytics/bigquery/**/*.sql', reloadServer: false }],
+
   tests: {
     suites: [
       {
