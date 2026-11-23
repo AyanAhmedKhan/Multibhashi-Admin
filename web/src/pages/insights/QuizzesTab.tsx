@@ -6,6 +6,7 @@ import { Badge, Card, Empty, ErrorNote, Spinner, Stat, Table, Tabs, Td } from '.
 import { Bars, ChartCard } from '../../components/charts'
 import { RankList } from '../OverviewPage'
 import { PATH_LABEL } from './QuizCostSection'
+import { QuizReleaseLog } from './QuizReleaseLog'
 
 type Path = 'legacy' | 'counted' | 'evidence'
 interface Summary {
@@ -144,6 +145,7 @@ export function QuizzesTab({ days }: { days: number }) {
 
   return (
     <div className="space-y-6">
+      <QuizReleaseLog />
       {d.empty === 'no_tables' ? (
         <Card>
           <Empty title="The quiz answer tables aren’t in this database">

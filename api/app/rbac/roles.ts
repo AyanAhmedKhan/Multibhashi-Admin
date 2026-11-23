@@ -48,6 +48,7 @@ export const SYSTEM_ROLES: SystemRole[] = [
     permissions: [
       'analytics.read',
       'analytics.cost.read',
+      'analytics.releases.manage',
       'tutor.access.read',
       'tutor.access.grant',
       'tutor.access.revoke',

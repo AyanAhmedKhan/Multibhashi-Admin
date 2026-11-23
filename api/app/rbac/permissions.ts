@@ -86,6 +86,7 @@ export const MODULES: ModuleDef[] = [
       p('analytics.read', 'Users, engagement, screens and AI usage (aggregates only)', 'read', true),
       p('analytics.cost.read', 'AI cost, revenue and margins', 'sensitive', true),
       p('analytics.costs.manage', 'Edit the cost rate card', 'critical', true),
+      p('analytics.releases.manage', 'Log quiz changes for before/after comparisons', 'write', true),
     ],
   },
   {
