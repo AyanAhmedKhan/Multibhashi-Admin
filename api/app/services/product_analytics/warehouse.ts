@@ -118,3 +118,11 @@ export interface OpenWarehouse {
   refs: Refs | null
   client: Warehouse | null
 }
+
+/** The configuration and, when it is complete, the real client and table names. */
+export async function openWarehouse(config?: WarehouseConfig): Promise<OpenWarehouse> {
+  const { readWarehouseConfig } = await import('#services/product_analytics/config')
+  const cfg = config ?? (await readWarehouseConfig())
+  if (!cfg.connected) return { config: cfg, refs: null, client: null }
+  return { config: cfg, refs: refsOf(cfg), client: await bigQueryWarehouse(cfg) }
+}

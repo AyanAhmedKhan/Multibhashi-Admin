@@ -1,8 +1,9 @@
 -- fact_quiz_attempts: one row per quiz attempt, from the three quiz log tables the console's
 -- quiz pages already read (user_quiz_logs, webinar_class_quiz_logs, session_call_quiz_logs).
 -- context: course | webinar | session. attempt_key: '<context>:<log id>'. started_at: the
--- app's quiz_start_timestamp when valid, else the row's created_at. score_pct: correct over
--- total questions, where the log has those counts. No answer text is read.
+-- app's quiz_start_timestamp when valid, else the row's created_at. activity_date: the IST
+-- date the log row was created (server time, the export's date filter). score_pct: correct
+-- over total questions, where the log has those counts. No answer text is read.
 CREATE TABLE IF NOT EXISTS `{{project}}.{{dataset}}.fact_quiz_attempts` (
   attempt_key STRING NOT NULL,
   context STRING,

@@ -5,6 +5,7 @@
 -- sees payment then booking. gateway_verified: a real Razorpay payment id (pay_ + 14
 -- characters); manual and imported bookings carry a made-up one. gateway_ref_hash: a hash of
 -- that id, to spot the duplicate rows a retried request can insert. The id itself is not kept.
+-- created_date: the IST date of the transaction row (the export's date filter).
 CREATE TABLE IF NOT EXISTS `{{project}}.{{dataset}}.fact_payments` (
   payment_id INT64 NOT NULL,
   td_user_id INT64,
