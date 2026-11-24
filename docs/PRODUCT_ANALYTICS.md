@@ -253,3 +253,14 @@ last 7 days and forgets accounts that sign-in v2 marked `deleted` in that time.
 **Not covered here** (app and legal side of MUL-153): the notice and the toggle in the app, the
 legal review, Clarity masking, and a retention policy for the MySQL activity tables
 (`student_activity_events` etc.; see `docs/ANALYTICS_CONSOLIDATION.md`).
+
+## 7. Consolidation with the activity pipeline (MUL-155)
+
+`analytics:parity [--days 14] [--verbose] [--json]` compares, day by day, the concepts both
+pipelines carry. On the old side are MySQL `student_sessions` and `student_activity_events`;
+on the new side, the BigQuery events and `m_sessions`. The concepts are active learners, time
+in app, sessions, quiz opened and completed, recordings played and the quiz telemetry events.
+
+The output says whether the gating concepts have matched for 14 days in a row. It is
+read-only and retires nothing. The plan, the mapping and the gates for retiring the old
+writes are in `docs/ANALYTICS_CONSOLIDATION.md`.
