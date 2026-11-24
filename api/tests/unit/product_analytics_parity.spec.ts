@@ -9,7 +9,7 @@ const RANGE = { from: '2026-11-01', to: '2026-11-14' }
 /** The same daily figures on both sides, with BigQuery scaled by `ratio`. */
 function sides(ratio: (day: string) => number) {
   const days = daysOf(RANGE)
-  const mysqlEvents = days.flatMap((day, i) => [
+  const mysqlEvents = days.flatMap((_day, i) => [
     { day: 20758 + i, event_type: 'quiz_start', n: 100 },
     { day: 20758 + i, event_type: 'quiz_completed', n: 50 },
   ])

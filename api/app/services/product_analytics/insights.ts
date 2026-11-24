@@ -71,7 +71,7 @@ export class ProductInsights {
    */
   private async answer<T>(key: string, range: Q.DayRange | null, build: (run: (sql: string, extra?: QueryParams) => Promise<Record<string, unknown>[]>, r: Refs) => Promise<T>): Promise<Answer<T>> {
     const { config, refs, client } = await this.open()
-    if (!client || !refs) return { connected: false, ...publicStatus(config) } as NotConnected
+    if (!client || !refs) return { ...publicStatus(config), connected: false } as NotConnected
     const cacheKey = `${key}:${range ? `${range.from}:${range.to}` : ''}`
     const hit = this.#cache.get(cacheKey)
     if (hit && Date.now() - hit.at < CACHE_MS) return hit.value as Answer<T>

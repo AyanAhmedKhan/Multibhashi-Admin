@@ -313,7 +313,6 @@ export class MysqlFactSource implements FactSource {
   }
 
   private users(schema: Schema, range: FactRange, exportedAt: string): FactRows {
-    const self = this
     const { since, until, sinceMs, untilMs } = bounds(range)
     const hasSessions = has(schema, 'student_sessions')
     const hasLeads = has(schema, 'direct_leads')

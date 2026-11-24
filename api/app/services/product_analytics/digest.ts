@@ -80,7 +80,7 @@ export async function digestData(insights: ProductInsights, week: { from: string
     insights.status(),
   ])
   if (!isReady(overview) || !isReady(features) || !isReady(funnels) || !isReady(screens) || !isReady(status)) {
-    const blocked = [overview, features, funnels, screens, status].find((a) => !isReady(a))!
+    const blocked = ([overview, features, funnels, screens, status] as Answer<unknown>[]).find((a) => !isReady(a))!
     if (!blocked.connected) return { ok: false, reason: `Product analytics is not connected (${blocked.problem ?? `missing ${blocked.missing.join(', ')}`})` }
     return { ok: false, reason: (blocked as NotReady).message }
   }
