@@ -71,7 +71,9 @@ test.group('Insights: product analytics endpoints (MUL-152)', (group) => {
     await cleanup()
     await db.from('console_settings').where('key', 'mfa_method').delete()
     if (previousMfa !== null) {
-      await db.table('console_settings').insert({ key: 'mfa_method', value: typeof previousMfa === 'string' ? previousMfa : JSON.stringify(previousMfa), updated_at: new Date() })
+      // mysql2 hands JSON columns back parsed ('totp'): encode again, unless it came back as JSON text.
+      const value = typeof previousMfa === 'string' && previousMfa.startsWith('"') ? previousMfa : JSON.stringify(previousMfa)
+      await db.table('console_settings').insert({ key: 'mfa_method', value, updated_at: new Date() })
     }
     settingsService.clearCache()
   })
