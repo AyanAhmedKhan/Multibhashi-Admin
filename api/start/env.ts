@@ -104,6 +104,8 @@ const env = await Env.create(new URL('../', import.meta.url), {
   // the JSON itself (raw or base64) or a path to the key file.
   GCP_ANALYTICS_CREDENTIALS_JSON: Env.schema.string.optional(),
   GCP_ANALYTICS_CREDENTIALS_FILE: Env.schema.string.optional(),
+  // Who gets the Monday digest (analytics:weekly-digest): comma-separated e-mail addresses.
+  ANALYTICS_DIGEST_TO: Env.schema.string.optional(),
 })
 
 if (env.get('NODE_ENV') === 'production') {

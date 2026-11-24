@@ -145,3 +145,54 @@ counted in aggregate (§5).
 **Quality.** After a full run the command counts the day's events, sessions, screens and
 features. It fails when there are events but no sessions, and warns when there are no events.
 Each model row carries `modelled_at`. The Health tab flags a model older than 26 hours.
+
+## 4. Insights pages and the weekly digest (MUL-152)
+
+**Pages.** Insights gains a second group of tabs, "Product analytics": **Overview, Screens,
+Features, Funnels, Retention, Health**. They sit behind the existing `analytics.read`
+permission. The MySQL tabs (Users & growth, Screens & content, AI tutor usage, Quizzes, Cost)
+are unchanged.
+
+The API is `GET /api/insights/product/{status,overview,screens,features,funnels,dropoffs,retention,health}`
+with `?days=7|14|30|90`; periods end yesterday (IST), the last modelled day. The pages read
+only the modelled tables and a few small facts tables, never `events_raw`. Distinct people over a
+range come from merging the daily HLL sketches, and answers are cached for 10 minutes.
+
+| State | What the page shows |
+|---|---|
+| `GCP_ANALYTICS_*` not set | "Product analytics isn't connected yet", naming the missing settings (names only) |
+| Tables or first model run missing | "No product analytics data yet", with the commands to run |
+| Ready | the page; a footnote gives the period and the opt-out rule |
+
+**Funnels** show all five funnels with step conversion, median time between steps, a
+breakdown (platform, channel, app version) and **drop-off lists**. Selecting "Who stopped"
+under a step shows where the learners who stopped there came from, by platform, version and
+channel. Staff who also hold `learners.read` additionally see the latest 50 learners, linked
+to their console page by `td_user_id`; that needs `identities`. Session replays are not linked:
+Clarity carries no learner id.
+
+**Weekly digest.** `analytics:weekly-digest` covers the last full Monday–Sunday IST week against
+the week before:
+- the KPIs: weekly actives, new verified learners, activation, stickiness and sessions;
+- the 5 biggest week-on-week changes, ignoring numbers under 20 in both weeks;
+- the top drop-off: the funnel step that lost the most learners.
+
+It is sent through the console's mailer (`SMTP_*`) to `ANALYTICS_DIGEST_TO`, a comma-separated
+list. `--dry-run` prints the subject, text and HTML instead of sending; `--sample` uses
+example numbers, to preview the layout without BigQuery. When product analytics isn't
+connected it sends nothing.
+
+## 5. Schedule (host crontab, IST)
+
+```
+30 2 * * *  cd /opt/multibhashi-admin && docker compose -f deploy/docker-compose.yml exec -T admin-api node ace analytics:export-facts
+0 3 * * *   cd /opt/multibhashi-admin && docker compose -f deploy/docker-compose.yml exec -T admin-api node ace analytics:models
+0 9 * * 1   cd /opt/multibhashi-admin && docker compose -f deploy/docker-compose.yml exec -T admin-api node ace analytics:weekly-digest
+```
+
+The first time:
+1. Run `analytics:export-facts --full` (off-peak).
+2. Run `analytics:models --from <the first day with events> --to <yesterday>`.
+
+A failing job exits non-zero (cron mails the host owner), and the Health tab marks a source
+stale after 26 hours.

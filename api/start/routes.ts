@@ -19,6 +19,7 @@ const TutorController = () => import('#controllers/tutor_controller')
 const AiProController = () => import('#controllers/ai_pro_controller')
 const InsightsController = () => import('#controllers/insights_controller')
 const QuizImpactController = () => import('#controllers/quiz_impact_controller')
+const ProductInsightsController = () => import('#controllers/product_insights_controller')
 
 const id = { id: router.matchers.number() }
 
@@ -163,6 +164,16 @@ router
           .use(middleware.can(['analytics.read', 'analytics.releases.manage']))
         router.get('insights/quiz-metrics', [QuizImpactController, 'metrics']).use(middleware.can(['analytics.read']))
         router.get('insights/quiz-metrics/series', [QuizImpactController, 'series']).use(middleware.can(['analytics.read']))
+
+        // Product analytics (BigQuery models, MUL-152). The drop-off learner list needs learners.read too.
+        router.get('insights/product/status', [ProductInsightsController, 'status']).use(middleware.can(['analytics.read']))
+        router.get('insights/product/overview', [ProductInsightsController, 'overview']).use(middleware.can(['analytics.read']))
+        router.get('insights/product/screens', [ProductInsightsController, 'screens']).use(middleware.can(['analytics.read']))
+        router.get('insights/product/features', [ProductInsightsController, 'features']).use(middleware.can(['analytics.read']))
+        router.get('insights/product/funnels', [ProductInsightsController, 'funnels']).use(middleware.can(['analytics.read']))
+        router.get('insights/product/dropoffs', [ProductInsightsController, 'dropoffs']).use(middleware.can(['analytics.read']))
+        router.get('insights/product/retention', [ProductInsightsController, 'retention']).use(middleware.can(['analytics.read']))
+        router.get('insights/product/health', [ProductInsightsController, 'health']).use(middleware.can(['analytics.read']))
 
         // Administration: staff
         router.get('staff', [StaffController, 'index']).use(middleware.can(['console.staff.read']))
