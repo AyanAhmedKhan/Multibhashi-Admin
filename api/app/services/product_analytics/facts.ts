@@ -386,6 +386,25 @@ export interface ExportOptions {
   refs?: Refs
   log?: (line: string) => void
   now?: Date
+  /** Learners removed with analytics:forget-user (MUL-153): never exported again. */
+  suppress?: Suppression
+}
+
+export interface Suppression {
+  tdUserIds: Set<number>
+  appspotIds: Set<string>
+}
+
+/** Drops forgotten learners' rows: by td_user_id, and identities also by appspot_id. */
+export async function* withoutForgotten(pages: AsyncIterable<Record<string, unknown>[]>, suppress: Suppression): AsyncGenerator<Record<string, unknown>[]> {
+  for await (const page of pages) {
+    yield page.filter((row) => {
+      const td = row.td_user_id
+      if (typeof td === 'number' && suppress.tdUserIds.has(td)) return false
+      const appspot = row.appspot_id
+      return !(typeof appspot === 'string' && suppress.appspotIds.has(appspot))
+    })
+  }
 }
 
 /** Writes pages of rows as NDJSON (only the spec's columns, in order); returns the row count. */
@@ -425,7 +444,9 @@ export async function exportFacts(opts: ExportOptions): Promise<FactResult[]> {
           continue
         }
         const file = join(dir, `${table}.ndjson`)
-        const count = await writeNdjson(rows, spec.columns, file)
+        const suppress = opts.suppress
+        const kept = suppress && (suppress.tdUserIds.size || suppress.appspotIds.size) ? withoutForgotten(rows, suppress) : rows
+        const count = await writeNdjson(kept, spec.columns, file)
         if (!opts.warehouse || !opts.refs) {
           results.push({ table, status: 'counted', rows: count })
           log(`${table}: ${count} rows read (dry run, nothing loaded)`)

@@ -18,6 +18,14 @@ export class FakeWarehouse implements Warehouse {
     return this.respond(sql, params)
   }
 
+  /** DML: recorded with the queries; the responder's first row may carry `affected`. */
+  async execute(sql: string, params?: QueryParams, types?: QueryTypes) {
+    this.queries.push({ sql, params, types })
+    const rows = await this.respond(sql, params)
+    const affected = rows[0]?.affected
+    return { affectedRows: affected === undefined ? null : Number(affected) }
+  }
+
   async load(table: string, ndjsonFile: string, write: WriteDisposition) {
     const text = await readFile(ndjsonFile, 'utf8')
     this.loads.push({ table, write, rows: text.split('\n').filter(Boolean).map((line) => JSON.parse(line)) })

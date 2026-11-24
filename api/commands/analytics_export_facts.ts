@@ -66,8 +66,12 @@ export default class AnalyticsExportFacts extends BaseCommand {
       return
     }
     this.logger.info(range.full ? 'Exporting everything (--full).' : `Exporting ${range.from} → ${range.to} (IST).`)
+    const { forgottenIds } = await import('#services/product_analytics/forget')
+    // Learners removed with analytics:forget-user stay out even if MySQL still has their rows.
+    const suppress = await forgottenIds()
     const started = Date.now()
     const results = await exportFacts({
+      suppress,
       range,
       tables: only as never,
       source: new MysqlFactSource(),

@@ -196,3 +196,60 @@ The first time:
 
 A failing job exits non-zero (cron mails the host owner), and the Health tab marks a source
 stale after 26 hours.
+
+## 6. Privacy: opt-out, retention, deletion (MUL-153, server side)
+
+**What is stored.**
+- No phone, e-mail, name or free text. The collector rejects phone- and e-mail-like values,
+  and the facts export selects ids, dates, statuses and amounts only.
+- `user_id` is the appspot `_id`; the facts use the teachers-dashboard `users.id`.
+
+**Opt-out (`context.opted_out`).** Analytics is on for every learner, with an opt-out toggle in
+Settings (decision 4).
+- Once a learner opts out, the app SDK sends only events of class `essential` in the tracking
+  plan: `otp_failed`, `password_login_failed`, `privacy_notice_viewed`/`_dismissed`,
+  `analytics_opt_out_changed`, `app_error`, `web_vital`, `api_slow`. Each carries
+  `opted_out = true`.
+- **Their `analytics` events never arrive**: no screens, features or funnel steps. Clarity
+  follows the same switch in the app.
+- In the warehouse:
+  - the behavioural models (sessions, screens, features, funnels, retention, first-seen)
+    leave out every row with `opted_out = TRUE`, even if one slipped through;
+  - `m_health_daily` counts those essential events in aggregate (errors and vitals per screen
+    and version);
+  - `m_identity_links` still records the device link, so a deletion request finds every row.
+- Opting back in (`analytics_opt_out_changed` with `opted_out: false`) resumes from that moment.
+  Nothing is backfilled.
+
+**Retention.**
+
+| Data | Kept |
+|---|---|
+| `events_raw` | 395 days (partition expiry in the DDL: no job needed) |
+| `events_dev` | 30 days |
+| `m_sessions`, `m_funnel_steps` (person-level) | 395 days |
+| aggregates (`m_screen_daily`, `m_feature_daily`, `m_retention_weekly`, `m_health_daily`) | kept (counts and HLL sketches, no ids) |
+| facts, `identities`, `m_user_firsts`, `m_identity_links` | while the account exists; removed by `analytics:forget-user` |
+
+**Deletion.** `analytics:forget-user <appspot_id | td_user_id> [--dry-run] [--reason …]`:
+1. **Resolve the ids.** Find the other id through `identities` (and MySQL `learner_accounts`
+   when it exists), plus the anonymous ids of the learner's devices.
+2. **Delete their rows.** In `events_raw` and `events_dev`: their events, and their devices'
+   *anonymous* events (never another signed-in learner's rows on a shared device). Also every
+   fact table, `identities` and the person-level models. Aggregates hold no id.
+3. **Log it.** The request goes in `console_analytics_forgotten` (migration 1793000000013,
+   append only) and in the audit log. The nightly facts export skips anyone in that table, so
+   a MySQL row that still exists doesn't bring them back.
+
+BigQuery can't delete rows still in the streaming buffer (rows the collector wrote minutes to
+hours ago), so events from today and yesterday (IST) are left for the next run.
+`analytics:forget-user --scheduled` does that run: daily, it re-runs every request from the
+last 7 days and forgets accounts that sign-in v2 marked `deleted` in that time.
+
+```
+0 2 * * *  cd /opt/multibhashi-admin && docker compose -f deploy/docker-compose.yml exec -T admin-api node ace analytics:forget-user --scheduled
+```
+
+**Not covered here** (app and legal side of MUL-153): the notice and the toggle in the app, the
+legal review, Clarity masking, and a retention policy for the MySQL activity tables
+(`student_activity_events` etc.; see `docs/ANALYTICS_CONSOLIDATION.md`).

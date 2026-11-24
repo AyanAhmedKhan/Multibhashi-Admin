@@ -15,6 +15,8 @@ export type WriteDisposition = 'WRITE_TRUNCATE' | 'WRITE_APPEND'
 export interface Warehouse {
   query(sql: string, params?: QueryParams, types?: QueryTypes): Promise<Record<string, unknown>[]>
   load(table: string, ndjsonFile: string, write: WriteDisposition): Promise<void>
+  /** A DML statement (DELETE …): how many rows it changed, when BigQuery says. */
+  execute(sql: string, params?: QueryParams, types?: QueryTypes): Promise<{ affectedRows: number | null }>
 }
 
 const NAME = /^[a-z_][a-z0-9_]{0,127}$/
@@ -91,13 +93,23 @@ export async function bigQueryWarehouse(config: WarehouseConfig): Promise<Wareho
     location: config.location,
     credentials: { client_email: config.credentials.client_email, private_key: config.credentials.private_key },
   })
+  const optionsOf = (sql: string, params?: QueryParams, types?: QueryTypes) => {
+    const options: Record<string, unknown> = { query: sql, location: config.location, useLegacySql: false }
+    if (params && Object.keys(params).length) options.params = params
+    if (types && Object.keys(types).length) options.types = types
+    return options as never
+  }
   return {
     async query(sql, params, types) {
-      const options: Record<string, unknown> = { query: sql, location: config.location, useLegacySql: false }
-      if (params && Object.keys(params).length) options.params = params
-      if (types && Object.keys(types).length) options.types = types
-      const [rows] = await bq.query(options as never)
+      const [rows] = await bq.query(optionsOf(sql, params, types))
       return rows as Record<string, unknown>[]
+    },
+    async execute(sql, params, types) {
+      const [job] = await bq.createQueryJob(optionsOf(sql, params, types))
+      await job.getQueryResults()
+      const [meta] = await job.getMetadata()
+      const affected = (meta as { statistics?: { query?: { numDmlAffectedRows?: string } } })?.statistics?.query?.numDmlAffectedRows
+      return { affectedRows: affected === undefined ? null : Number(affected) }
     },
     async load(table, ndjsonFile, write) {
       if (!NAME.test(table)) throw new Error(`Invalid table name: ${table}`)
