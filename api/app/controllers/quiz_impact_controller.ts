@@ -3,7 +3,7 @@ import ApiException from '#exceptions/api_exception'
 import { METRICS, METRIC_BY_KEY } from '#services/analytics/quiz_metrics'
 import quizMetricsStore from '#services/analytics/quiz_metrics_store'
 import quizReleases, { type ReleaseInput } from '#services/analytics/quiz_releases'
-import { quizMetricSeriesValidator, quizReleaseDeleteValidator, quizReleaseValidator } from '#validators/console'
+import { quizImpactValidator, quizMetricSeriesValidator, quizReleaseDeleteValidator, quizReleaseValidator } from '#validators/console'
 
 /**
  * Quiz before/after tracking (docs/QUIZ_OBSERVABILITY.md §7): the release log and the frozen
@@ -71,5 +71,17 @@ export default class QuizImpactController {
       rows: await quizMetricsStore.series(q.metric, segment, q.from, q.to),
       segments: await quizMetricsStore.segments(q.metric, q.from, q.to),
     }
+  }
+
+  /** Before vs after one logged change: every stored metric, for one segment. */
+  async impact({ request, actor }: HttpContext) {
+    const q = await quizImpactValidator.validate(request.qs())
+    return quizMetricsStore.impact({
+      releaseId: q.release,
+      segment: q.segment ?? 'all',
+      windowDays: q.window ?? 28,
+      skipDays: q.skip ?? 3,
+      includeCost: actor.permissions.has('analytics.cost.read'),
+    })
   }
 }

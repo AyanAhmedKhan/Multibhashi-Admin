@@ -164,6 +164,7 @@ router
           .use(middleware.can(['analytics.read', 'analytics.releases.manage']))
         router.get('insights/quiz-metrics', [QuizImpactController, 'metrics']).use(middleware.can(['analytics.read']))
         router.get('insights/quiz-metrics/series', [QuizImpactController, 'series']).use(middleware.can(['analytics.read']))
+        router.get('insights/quiz-impact', [QuizImpactController, 'impact']).use(middleware.can(['analytics.read']))
 
         // Product analytics (BigQuery models, MUL-152). The drop-off learner list needs learners.read too.
         router.get('insights/product/status', [ProductInsightsController, 'status']).use(middleware.can(['analytics.read']))

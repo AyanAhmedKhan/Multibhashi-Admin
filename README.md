@@ -92,13 +92,15 @@ erase). The demo/dev commands and the test suite refuse to run against a non-loc
 - Provider billing (Cost → Quizzes and Full bill, docs/QUIZ_OBSERVABILITY.md): set
   `OPENAI_ADMIN_KEY` and `GCP_BILLING_CREDENTIALS_JSON` + `GCP_BILLING_EXPORT_TABLE` (and the
   attribution ids) in `deploy/.env.production`, then sync daily from the host's crontab:
-  `15 3 * * * cd /opt/multibhashi-admin && docker compose -f deploy/docker-compose.yml exec -T admin-api node ace quiz:sync-provider-usage --days 7`.
+  `45 21 * * * cd /opt/multibhashi-admin && docker compose -p multibhashi-admin -f deploy/docker-compose.yml exec -T admin-api node ace quiz:sync-provider-usage --days 7 >> /var/log/mb-admin-quiz-sync.log 2>&1`
+  (the Hostinger server runs on UTC: 21:45 UTC is 03:15 IST).
   Without them the pages say "not connected" and the quiz figures are estimates.
 - Quiz before/after tracking (docs/QUIZ_OBSERVABILITY.md §7): after the deploy that adds it, run
   `node ace quiz:seed-releases` once (the changes made before the release log existed) and
   `node ace quiz:daily-metrics --backfill` once, off-peak: it reads the live answer tables from
   2026-09-01. Then, half an hour after the provider sync, from the host's crontab:
-  `45 3 * * * cd /opt/multibhashi-admin && docker compose -f deploy/docker-compose.yml exec -T admin-api node ace quiz:daily-metrics`.
+  `15 22 * * * cd /opt/multibhashi-admin && docker compose -p multibhashi-admin -f deploy/docker-compose.yml exec -T admin-api node ace quiz:daily-metrics >> /var/log/mb-admin-quiz-metrics.log 2>&1`
+  (03:45 IST).
   Settled days are frozen and never rewritten; `--force` exists only for a definition bug fix.
 - `console:dev-schema` and `console:seed-demo` refuse to run unless `NODE_ENV=development`
   and the database is on localhost.
