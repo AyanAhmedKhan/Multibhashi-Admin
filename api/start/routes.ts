@@ -163,6 +163,7 @@ router
           .use(middleware.can(['analytics.read', 'analytics.releases.manage']))
         router.get('insights/quiz-metrics', [QuizImpactController, 'metrics']).use(middleware.can(['analytics.read']))
         router.get('insights/quiz-metrics/series', [QuizImpactController, 'series']).use(middleware.can(['analytics.read']))
+        router.get('insights/quiz-impact', [QuizImpactController, 'impact']).use(middleware.can(['analytics.read']))
 
         // Administration: staff
         router.get('staff', [StaffController, 'index']).use(middleware.can(['console.staff.read']))

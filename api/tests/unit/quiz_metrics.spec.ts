@@ -7,6 +7,9 @@ import {
   attemptMetrics,
   bucketOf,
   combine,
+  compareWindows,
+  CLUSTER_FACTOR,
+  impactWindows,
   costMetrics,
   eventMetrics,
   histQuantile,
@@ -398,5 +401,88 @@ test.group('Quiz release log: seed list', () => {
         assert.include(DIRECTIONS, e.direction)
       }
     }
+  })
+})
+
+test.group('Quiz metrics: before vs after', () => {
+  const days = (from: string, n: number, f: (i: number) => Partial<MetricRow>) =>
+    Array.from({ length: n }, (_, i) => ({
+      day: new Date(Date.parse(`${from}T00:00:00Z`) + i * 86_400_000).toISOString().slice(0, 10),
+      num: 0,
+      den: 0,
+      hist: null,
+      basis: null,
+      ...f(i),
+    }))
+
+  test('windows: 28 days before the deploy day; after starts 3 days later and stops at the data', ({ assert }) => {
+    // 16 Nov 16:40 IST
+    const w = impactWindows('2026-11-16T11:10:31.000Z', { lastDay: '2026-11-24' })
+    assert.equal(w.deployDay, '2026-11-16')
+    assert.deepEqual(w.before, { from: '2026-10-19', to: '2026-11-15', days: 28 })
+    assert.deepEqual(w.after, { from: '2026-11-19', to: '2026-11-24', days: 6 })
+    // 23 Nov 23:35 IST is still the 23rd in IST, although it is 18:05 UTC
+    assert.equal(impactWindows('2026-11-23T18:05:27.000Z', { lastDay: '2026-11-24' }).deployDay, '2026-11-23')
+    assert.isNull(impactWindows('2026-11-23T18:05:27.000Z', { lastDay: '2026-11-24' }).after, 'nothing after yet')
+    assert.deepEqual(impactWindows('2026-10-01T06:00:00.000Z', { lastDay: '2026-12-31', windowDays: 14, skipDays: 0 }).after, { from: '2026-10-01', to: '2026-10-14', days: 14 })
+  })
+
+  test('a rate that clearly fell is "better" when lower is better', ({ assert }) => {
+    const def = METRIC_BY_KEY.get('sq_no_speech_share')!
+    const before = days('2026-10-19', 28, () => ({ num: 50, den: 1000 }))
+    const after = days('2026-11-19', 14, () => ({ num: 25, den: 1000 }))
+    const r = compareWindows(def, before, after, 14)
+    assert.closeTo(r.before.value!, 0.05, 1e-9)
+    assert.closeTo(r.after.value!, 0.025, 1e-9)
+    assert.closeTo(r.change!, -0.025, 1e-9)
+    assert.isBelow(r.interval![1], 0)
+    assert.equal(r.verdict, 'better')
+  })
+
+  test('the interval is widened for clustered answers, and a small move stays "no clear change"', ({ assert }) => {
+    const def = METRIC_BY_KEY.get('sq_late_share')!
+    const before = days('2026-10-19', 28, () => ({ num: 100, den: 1000 }))
+    const after = days('2026-11-19', 14, () => ({ num: 101, den: 1000 }))
+    const r = compareWindows(def, before, after, 14)
+    const p1 = 0.1
+    const p2 = 0.101
+    const se = Math.sqrt((p1 * (1 - p1)) / 28000 + (p2 * (1 - p2)) / 14000) * CLUSTER_FACTOR
+    assert.closeTo(r.interval![1] - r.interval![0], 2 * 1.96 * se, 1e-9)
+    assert.equal(r.verdict, 'no_clear_change')
+  })
+
+  test('guardrails that move are flagged "changed"; too few answers or days give no verdict', ({ assert }) => {
+    const pass = METRIC_BY_KEY.get('sq_correct_share')!
+    const moved = compareWindows(pass, days('2026-10-19', 28, () => ({ num: 600, den: 1000 })), days('2026-11-19', 14, () => ({ num: 750, den: 1000 })), 14)
+    assert.equal(moved.verdict, 'changed')
+    const few = compareWindows(pass, days('2026-10-19', 28, () => ({ num: 3, den: 5 })), days('2026-11-19', 14, () => ({ num: 4, den: 5 })), 14)
+    assert.equal(few.verdict, 'too_few')
+    const early = compareWindows(pass, days('2026-10-19', 28, () => ({ num: 600, den: 1000 })), days('2026-11-19', 3, () => ({ num: 750, den: 1000 })), 3)
+    assert.equal(early.verdict, 'too_early')
+    const none = compareWindows(pass, days('2026-10-19', 28, () => ({ num: 600, den: 1000 })), [], 0)
+    assert.equal(none.verdict, 'too_early')
+  })
+
+  test('counts compare per day; costs use SUM/SUM with day-to-day spread', ({ assert }) => {
+    const count = compareWindows(METRIC_BY_KEY.get('sq_answers')!, days('2026-10-19', 28, () => ({ num: 2000 })), days('2026-11-19', 14, (i) => ({ num: 9000 + i })), 14)
+    assert.equal(count.before.value, 2000)
+    assert.closeTo(count.after.value!, 9006.5, 1e-9)
+    assert.equal(count.before.sample, 56000)
+    const cost = METRIC_BY_KEY.get('cost_speech_per_sq_inr')!
+    const r = compareWindows(cost, days('2026-10-19', 28, (i) => ({ num: 1300 + (i % 2) * 20, den: 2000 })), days('2026-11-19', 14, (i) => ({ num: 1600 + (i % 2) * 20, den: 2000 })), 14)
+    assert.closeTo(r.before.value!, (14 * 1300 + 14 * 1320) / 56000, 1e-9)
+    assert.equal(r.verdict, 'changed', 'a longer answer costs more: "context" metrics report a change, not good or bad')
+  })
+
+  test('distributions compare means and also report medians', ({ assert }) => {
+    const def = METRIC_BY_KEY.get('wq_words')!
+    // edges [0, 1, 10, 25, 50, 100, 150, 200, 300]
+    const hb = [0, 200, 400, 300, 100, 0, 0, 0, 0]
+    const ha = [0, 50, 150, 250, 300, 200, 50, 0, 0]
+    const r = compareWindows(def, days('2026-10-19', 1, () => ({ num: 20000, den: 1000, hist: hb })), days('2026-11-19', 7, (i) => (i === 0 ? { num: 40000, den: 1000, hist: ha } : {})), 7)
+    assert.equal(r.before.value, 20)
+    assert.equal(r.after.value, 40)
+    assert.isAbove(r.after.median!, r.before.median!)
+    assert.equal(r.verdict, 'changed')
   })
 })

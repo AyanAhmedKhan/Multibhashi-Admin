@@ -728,7 +728,7 @@ test.group('Console end to end', (group) => {
     const TITLE = 'Test change (functional test)'
     const DAY = '2000-01-03'
     await db.from('console_quiz_releases').where('title', 'like', 'Test change%').delete()
-    await db.from('console_quiz_daily_metrics').where('day', DAY).delete()
+    await db.from('console_quiz_daily_metrics').where('day', '>=', '1999-12-01').where('day', '<=', '2000-02-28').delete()
     try {
       const a = await invitedUser('release-owner@test.local', 'super_admin')
       await completeSetup(client, a.token)
@@ -804,9 +804,41 @@ test.group('Console end to end', (group) => {
       cost.assertStatus(200)
       assert.equal(cost.body().rows[0].basis, 'actual')
       ;(await as(client, owner, 'get', `/api/insights/quiz-metrics/series?metric=no_such_metric&from=${DAY}&to=${DAY}`)).assertStatus(422)
+
+      // Before vs after a change: windows around its deploy day, cost rows only with the cost permission
+      const liveChange = await as(client, owner, 'post', '/api/insights/quiz-releases').json({
+        title: 'Test change (impact)',
+        kind: 'fix',
+        surface: 'app_web',
+        deployed_at: '2000-01-15T12:00:00+05:30',
+        expects: [{ metric: 'sq_no_speech_share', direction: 'down' }],
+      })
+      liveChange.assertStatus(200)
+      const impactRows = []
+      for (let i = 1; i <= 28; i++) {
+        const before = new Date(Date.UTC(2000, 0, 15 - i)).toISOString().slice(0, 10)
+        impactRows.push({ day: before, metric: 'sq_no_speech_share', segment: 'all', definition_version: 1, num: 60, den: 1000, final: true, computed_at: new Date() })
+        impactRows.push({ day: before, metric: 'cost_speech_per_sq_inr', segment: 'all', definition_version: 1, num: 1300, den: 2000, basis: 'actual', final: true, computed_at: new Date() })
+      }
+      for (let i = 3; i < 17; i++) {
+        const after = new Date(Date.UTC(2000, 0, 15 + i)).toISOString().slice(0, 10)
+        impactRows.push({ day: after, metric: 'sq_no_speech_share', segment: 'all', definition_version: 1, num: 20, den: 1000, final: true, computed_at: new Date() })
+      }
+      await db.table('console_quiz_daily_metrics').multiInsert(impactRows)
+      const impact = await as(client, ops, 'get', `/api/insights/quiz-impact?release=${liveChange.body().release.id}&window=28`)
+      impact.assertStatus(200)
+      assert.deepEqual(impact.body().windows.before, { from: '1999-12-18', to: '2000-01-14', days: 28 })
+      const noSpeech = impact.body().metrics.find((m: { key: string }) => m.key === 'sq_no_speech_share')
+      assert.equal(noSpeech.expected, 'down')
+      assert.equal(noSpeech.verdict, 'better')
+      assert.isFalse(impact.body().metrics.some((m: { source: string }) => m.source === 'bills'), 'no cost rows without the cost permission')
+      const ownerImpact = await as(client, owner, 'get', `/api/insights/quiz-impact?release=${liveChange.body().release.id}`)
+      assert.isTrue(ownerImpact.body().metrics.some((m: { key: string }) => m.key === 'cost_speech_per_sq_inr'))
+      ;(await as(client, owner, 'get', '/api/insights/quiz-impact?release=999999999')).assertStatus(404)
+      ;(await as(client, owner, 'get', `/api/insights/quiz-impact?release=${liveChange.body().release.id}&window=10`)).assertStatus(422)
     } finally {
       await db.from('console_quiz_releases').where('title', 'like', 'Test change%').delete()
-      await db.from('console_quiz_daily_metrics').where('day', DAY).delete()
+      await db.from('console_quiz_daily_metrics').where('day', '>=', '1999-12-01').where('day', '<=', '2000-02-28').delete()
     }
   }).timeout(60_000)
 })

@@ -216,3 +216,13 @@ export const quizMetricSeriesValidator = vine.compile(
     to: vine.string().trim().regex(DAY_LABEL),
   })
 )
+
+/** Before vs after one logged change. */
+export const quizImpactValidator = vine.compile(
+  vine.object({
+    release: vine.number().withoutDecimals().min(1),
+    segment: vine.string().trim().maxLength(64).optional(),
+    window: vine.number().withoutDecimals().in([14, 28, 56]).optional(),
+    skip: vine.number().withoutDecimals().min(0).max(7).optional(),
+  })
+)

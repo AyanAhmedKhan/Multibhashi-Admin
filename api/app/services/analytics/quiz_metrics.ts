@@ -108,8 +108,9 @@ export const METRICS: MetricDef[] = [
   m('ev_paste_blocked_rate', 'Paste blocks per Writing question', 'rate', 'events', '%', 'context', ['5'], 'quiz_paste_blocked of WQ questions shown.'),
 
   // ---- cost (provider bills, allocated per answer; estimates labelled)
-  m('cost_speech_inr', 'Speech-to-text spend', 'cost', 'bills', '₹', 'down', ['0'], 'Google speech-to-text attributed to quizzes, per day.'),
-  m('cost_marking_inr', 'Marking spend', 'cost', 'bills', '₹', 'down', ['0'], 'OpenAI quiz marking, per day.'),
+  // Total spend follows volume (a bulk assignment doubles it), so it is context; ₹ per answer is the signal
+  m('cost_speech_inr', 'Speech-to-text spend', 'cost', 'bills', '₹', 'context', ['0'], 'Google speech-to-text attributed to quizzes, per day.'),
+  m('cost_marking_inr', 'Marking spend', 'cost', 'bills', '₹', 'context', ['0'], 'OpenAI quiz marking, per day.'),
   m('cost_speech_per_sq_inr', 'Speech-to-text ₹ per Speaking answer', 'cost', 'bills', '₹', 'context', ['0', '2', '3'], "The day's speech spend ÷ SQ answers. Longer answers (phases 2–3) raise it."),
   m('cost_marking_per_answer_inr', 'Marking ₹ per marked answer', 'cost', 'bills', '₹', 'down', ['0'], "The day's marking spend ÷ non-empty answers."),
   m('cost_per_answer_inr', 'AI ₹ per answer', 'cost', 'bills', '₹', 'context', ['0'], 'Speech + marking ÷ SQ/WQ answers.'),
@@ -488,4 +489,121 @@ export function histQuantile(hist: number[], edges: number[], p: number) {
     seen += hist[i]
   }
   return edges[edges.length - 1]
+}
+
+// ---- before/after (the Impact view)
+
+/**
+ * The two windows around a change that reached learners at `deployedAt`: `before` is the
+ * `windowDays` IST days before the deploy day; `after` starts `skipDays` after it (learners
+ * pick up a new web bundle and a new app over a few days) and runs `windowDays`, cut at
+ * `lastDay` (the last day with data). Day labels, inclusive.
+ */
+export function impactWindows(deployedAt: string, opts: { windowDays?: number; skipDays?: number; lastDay: string }) {
+  const windowDays = opts.windowDays ?? 28
+  const skipDays = opts.skipDays ?? 3
+  const DAY = 86_400_000
+  const istDay = Math.floor((Date.parse(deployedAt) + 19_800_000) / DAY)
+  const label = (d: number) => new Date(d * DAY).toISOString().slice(0, 10)
+  const last = Math.round(Date.parse(`${opts.lastDay}T00:00:00Z`) / DAY)
+  const afterFrom = istDay + skipDays
+  const afterTo = Math.min(afterFrom + windowDays - 1, last)
+  return {
+    deployDay: label(istDay),
+    before: { from: label(istDay - windowDays), to: label(istDay - 1), days: windowDays },
+    after: afterTo >= afterFrom ? { from: label(afterFrom), to: label(afterTo), days: afterTo - afterFrom + 1 } : null,
+    windowDays,
+    skipDays,
+  }
+}
+
+export type Verdict = 'better' | 'worse' | 'changed' | 'no_clear_change' | 'too_few' | 'too_early'
+
+/**
+ * Standard errors are widened by this factor: one learner's answers are not independent (the
+ * same learner, the same quiz, the same day), so a plain binomial interval would be too narrow.
+ */
+export const CLUSTER_FACTOR = 1.5
+/** Fewer answers than this on either side: no verdict. */
+export const MIN_SAMPLE = 200
+/** Fewer days than this after the change: too early to say. */
+export const MIN_AFTER_DAYS = 7
+
+const mean = (xs: number[]) => xs.reduce((s, v) => s + v, 0) / xs.length
+const variance = (xs: number[]) => {
+  if (xs.length < 2) return 0
+  const m = mean(xs)
+  return xs.reduce((s, v) => s + (v - m) ** 2, 0) / (xs.length - 1)
+}
+
+/** Variance of a distribution from its buckets (each value at its bucket's middle). */
+export function histVariance(hist: number[], edges: number[]) {
+  const n = hist.reduce((s, v) => s + v, 0)
+  if (n < 2) return 0
+  const mid = (i: number) => (edges[i + 1] === undefined ? edges[i] * 1.25 || edges[i] : (edges[i] + edges[i + 1]) / 2)
+  const m = hist.reduce((s, c, i) => s + c * mid(i), 0) / n
+  return hist.reduce((s, c, i) => s + c * (mid(i) - m) ** 2, 0) / (n - 1)
+}
+
+type DayRow = Pick<MetricRow, 'day' | 'num' | 'den' | 'hist' | 'basis'>
+
+/**
+ * One metric before vs after. Values: rate = share (0–1), distribution = mean (with the median),
+ * count = per day, cost = SUM(num) / SUM(den). The interval is approximate (normal, widened by
+ * CLUSTER_FACTOR; per-day spread for counts and costs) and the verdict only says "better" or
+ * "worse" when it excludes no change.
+ */
+export function compareWindows(def: MetricDef, before: DayRow[], after: DayRow[], afterDays: number) {
+  const b = combine(def, before)
+  const a = combine(def, after)
+  const out = {
+    before: { value: b.value, sample: b.den, days: before.length, median: null as number | null, basis: b.basis },
+    after: { value: a.value, sample: a.den, days: after.length, median: null as number | null, basis: a.basis },
+    change: null as number | null,
+    relChange: null as number | null,
+    interval: null as [number, number] | null,
+    verdict: 'no_clear_change' as Verdict,
+  }
+  if (def.kind === 'count') {
+    const perDay = (rows: DayRow[]) => rows.map((r) => r.num)
+    out.before.value = before.length ? mean(perDay(before)) : null
+    out.after.value = after.length ? mean(perDay(after)) : null
+    out.before.sample = before.reduce((s, r) => s + r.num, 0)
+    out.after.sample = after.reduce((s, r) => s + r.num, 0)
+  }
+  if (def.kind === 'distribution' && def.edges) {
+    out.before.median = b.hist ? histQuantile(b.hist, def.edges, 50) : null
+    out.after.median = a.hist ? histQuantile(a.hist, def.edges, 50) : null
+  }
+  if (out.before.value === null || out.after.value === null) {
+    out.verdict = afterDays < MIN_AFTER_DAYS ? 'too_early' : 'too_few'
+    return out
+  }
+  out.change = out.after.value - out.before.value
+  out.relChange = out.before.value !== 0 ? out.change / Math.abs(out.before.value) : null
+
+  let se: number | null = null
+  if (def.kind === 'rate' && b.den > 0 && a.den > 0) {
+    const p1 = b.value!
+    const p2 = a.value!
+    se = Math.sqrt((p1 * (1 - p1)) / b.den + (p2 * (1 - p2)) / a.den) * CLUSTER_FACTOR
+  } else if (def.kind === 'distribution' && def.edges && b.hist && a.hist && b.den > 1 && a.den > 1) {
+    se = Math.sqrt(histVariance(b.hist, def.edges) / b.den + histVariance(a.hist, def.edges) / a.den) * CLUSTER_FACTOR
+  } else if (def.kind === 'count' || def.kind === 'cost') {
+    // Day to day spread: each day is one observation
+    const daily = (rows: DayRow[]) => rows.filter((r) => def.kind === 'count' || r.den > 0).map((r) => (def.kind === 'count' ? r.num : r.num / r.den))
+    const d1 = daily(before)
+    const d2 = daily(after)
+    if (d1.length >= 2 && d2.length >= 2) se = Math.sqrt(variance(d1) / d1.length + variance(d2) / d2.length)
+  }
+  if (se !== null) out.interval = [out.change - 1.96 * se, out.change + 1.96 * se]
+
+  const sampleTooSmall = def.kind === 'rate' || def.kind === 'distribution' ? Math.min(b.den, a.den) < MIN_SAMPLE : false
+  if (afterDays < MIN_AFTER_DAYS) out.verdict = 'too_early'
+  else if (sampleTooSmall || !out.interval) out.verdict = 'too_few'
+  else if (out.interval[0] > 0 || out.interval[1] < 0) {
+    const up = out.change > 0
+    out.verdict = def.better === 'up' ? (up ? 'better' : 'worse') : def.better === 'down' ? (up ? 'worse' : 'better') : 'changed'
+  } else out.verdict = 'no_clear_change'
+  return out
 }

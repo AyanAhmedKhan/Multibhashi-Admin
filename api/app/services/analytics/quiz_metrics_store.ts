@@ -7,8 +7,10 @@ import {
   METRIC_BY_KEY,
   answerMetrics,
   attemptMetrics,
+  compareWindows,
   costMetrics,
   eventMetrics,
+  impactWindows,
   isFinal,
   type AttemptDevice,
   type AttemptRow,
@@ -20,6 +22,7 @@ import { providerActuals, ratesFor, type ProviderDbRow } from '#services/analyti
 import { costModelStore } from '#services/analytics/cost_model'
 import providerSync from '#services/analytics/provider_sync'
 import { googleIsQuizSpeech, openaiIsQuiz } from '#services/analytics/cost_attribution'
+import quizReleases from '#services/analytics/quiz_releases'
 
 /**
  * Writes and reads console_quiz_daily_metrics (docs/QUIZ_OBSERVABILITY.md §7).
@@ -346,6 +349,74 @@ class QuizMetricsStore {
       basis: (r.basis as string) ?? null,
       final: !!r.final,
     }))
+  }
+
+  /**
+   * Before vs after one logged change, for one segment: every stored metric over the window
+   * before the deploy day and the window after it (impactWindows), compared by compareWindows.
+   * Cost metrics only when `includeCost`. A change that hasn't reached learners has no windows.
+   */
+  async impact({ releaseId, segment = 'all', windowDays = 28, skipDays = 3, includeCost }: { releaseId: number; segment?: string; windowDays?: number; skipDays?: number; includeCost: boolean }) {
+    const release = await quizReleases.find(releaseId)
+    if (!release.deployedAt) return { release, segment, windows: null, metrics: [], segments: [] }
+    const status = await this.status()
+    const lastDay = status.lastDay ?? istDayLabel(istDayOf(Date.now()))
+    const w = impactWindows(release.deployedAt, { windowDays, skipDays, lastDay })
+    const to = w.after?.to ?? w.before.to
+    const rows = (await db
+      .from(TABLE)
+      .where('definition_version', DEFINITION_VERSION)
+      .where('segment', segment)
+      .where('day', '>=', w.before.from)
+      .where('day', '<=', to)
+      .select(db.raw('DATE_FORMAT(day, "%Y-%m-%d") AS day'), 'metric', 'num', 'den', 'hist', 'basis')) as Record<string, unknown>[]
+    const byMetric = new Map<string, { before: MetricRow[]; after: MetricRow[] }>()
+    for (const r of rows) {
+      const day = String(r.day)
+      const row: MetricRow = {
+        day,
+        metric: String(r.metric),
+        segment,
+        num: n(r.num),
+        den: n(r.den),
+        hist: r.hist === null || r.hist === undefined ? null : ((typeof r.hist === 'string' ? JSON.parse(r.hist) : r.hist) as number[]),
+        basis: (r.basis as MetricRow['basis']) ?? null,
+      }
+      const side = day >= w.before.from && day <= w.before.to ? 'before' : w.after && day >= w.after.from && day <= w.after.to ? 'after' : null
+      if (!side) continue
+      if (!byMetric.has(row.metric)) byMetric.set(row.metric, { before: [], after: [] })
+      byMetric.get(row.metric)![side].push(row)
+    }
+    const expected = new Map((release.expects ?? []).map((e) => [e.metric, e.direction]))
+    const metrics = METRICS.filter((d) => includeCost || d.source !== 'bills')
+      .filter((d) => byMetric.has(d.key))
+      .map((d) => {
+        const sides = byMetric.get(d.key)!
+        return {
+          key: d.key,
+          label: d.label,
+          kind: d.kind,
+          source: d.source,
+          unit: d.unit,
+          better: d.better,
+          phases: d.phases,
+          how: d.how,
+          expected: expected.get(d.key) ?? null,
+          ...compareWindows(d, sides.before, sides.after, w.after?.days ?? 0),
+        }
+      })
+    // Segments worth offering: those with answers or app events across the two windows
+    const segments = (await db
+      .from(TABLE)
+      .where('definition_version', DEFINITION_VERSION)
+      .whereIn('metric', ['sq_answers', 'wq_answers', 'ev_sq_shown', 'ev_wq_shown'])
+      .where('day', '>=', w.before.from)
+      .where('day', '<=', to)
+      .groupBy('segment')
+      .select('segment', db.raw('SUM(num) AS n'))
+      .orderByRaw('SUM(num) DESC')
+      .limit(30)) as { segment: string; n: unknown }[]
+    return { release, segment, windows: w, metrics, segments: segments.map((s) => ({ segment: String(s.segment), answers: n(s.n) })) }
   }
 
   /** Segments a metric has rows for in a window (device:web, os:ios, …), most answers first. */
