@@ -174,6 +174,26 @@ test.group('analytics:bq-setup (MUL-148)', () => {
     assert.match(warehouse.sql[0], /^-- [\s\S]*CREATE SCHEMA IF NOT EXISTS/)
   })
 
+  // The console is Data Editor on the dataset only. BigQuery checks datasets.create on the
+  // project even for CREATE SCHEMA IF NOT EXISTS, so with an owner-created dataset the
+  // first statement used to fail with Access Denied (found in the first real setup).
+  test('an existing dataset is not created again; the tables are', async ({ assert }) => {
+    const warehouse = Object.assign(new FakeWarehouse(), { datasetExists: async () => true })
+    const lines: string[] = []
+    const result = await bqSetup({ config: TEST_CONFIG, apply: true, printSql: false, log: (l) => lines.push(l), warehouse })
+    assert.equal(result.applied, result.plan.length - 1)
+    assert.notMatch(warehouse.sql.join('\n'), /CREATE SCHEMA/)
+    assert.include(lines.join('\n'), 'skipping 1/')
+    assert.include(lines.join('\n'), '(already exists)')
+  })
+
+  test('a missing dataset is created first', async ({ assert }) => {
+    const warehouse = Object.assign(new FakeWarehouse(), { datasetExists: async () => false })
+    const result = await bqSetup({ config: TEST_CONFIG, apply: true, printSql: false, log: () => {}, warehouse })
+    assert.equal(result.applied, result.plan.length)
+    assert.match(warehouse.sql[0], /CREATE SCHEMA IF NOT EXISTS/)
+  })
+
   test('stops at the first failing statement', async ({ assert }) => {
     let calls = 0
     const warehouse = new FakeWarehouse(() => {

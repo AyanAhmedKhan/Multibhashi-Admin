@@ -17,6 +17,11 @@ export interface Warehouse {
   load(table: string, ndjsonFile: string, write: WriteDisposition): Promise<void>
   /** A DML statement (DELETE …): how many rows it changed, when BigQuery says. */
   execute(sql: string, params?: QueryParams, types?: QueryTypes): Promise<{ affectedRows: number | null }>
+  /**
+   * Whether the configured dataset exists. Needs only bigquery.datasets.get, which the
+   * console has through BigQuery Data Editor on the dataset. Optional for test fakes.
+   */
+  datasetExists?(): Promise<boolean>
 }
 
 const NAME = /^[a-z_][a-z0-9_]{0,127}$/
@@ -103,6 +108,10 @@ export async function bigQueryWarehouse(config: WarehouseConfig): Promise<Wareho
     async query(sql, params, types) {
       const [rows] = await bq.query(optionsOf(sql, params, types))
       return rows as Record<string, unknown>[]
+    },
+    async datasetExists() {
+      const [exists] = await bq.dataset(config.dataset).exists()
+      return exists
     },
     async execute(sql, params, types) {
       const [job] = await bq.createQueryJob(optionsOf(sql, params, types))

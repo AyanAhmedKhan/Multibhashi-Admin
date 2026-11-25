@@ -121,13 +121,29 @@ export function setupPlan(files: DdlFile[], vars: DdlVars): DdlStatement[] {
   )
 }
 
-/** Runs the plan in order and stops at the first failure (later tables may depend on it). */
-export async function applyPlan(plan: DdlStatement[], warehouse: Warehouse, onStep?: (s: DdlStatement) => void) {
+/**
+ * Runs the plan in order and stops at the first failure (later tables may depend on it).
+ * The CREATE SCHEMA statement is skipped when the dataset already
+ * exists: even with IF NOT EXISTS, BigQuery checks bigquery.datasets.create on the PROJECT,
+ * which the console account deliberately doesn't have (it is Data Editor on the dataset
+ * only). So an owner can create the dataset once, and the console sets up the rest.
+ */
+export async function applyPlan(
+  plan: DdlStatement[],
+  warehouse: Warehouse,
+  onStep?: (s: DdlStatement, skipped?: string) => void
+) {
+  let applied = 0
   for (const statement of plan) {
+    if (statement.kind === 'dataset' && warehouse.datasetExists && (await warehouse.datasetExists())) {
+      onStep?.(statement, 'already exists')
+      continue
+    }
     onStep?.(statement)
     await warehouse.query(statement.sql)
+    applied++
   }
-  return plan.length
+  return applied
 }
 
 /** Placeholder project for printing the DDL before GCP_ANALYTICS_PROJECT is set. */
@@ -168,12 +184,12 @@ export async function bqSetup(opts: SetupOptions): Promise<{ plan: DdlStatement[
     return { plan, applied: 0 }
   }
   const warehouse = opts.warehouse ?? (await bigQueryWarehouse(config))
-  let done = 0
-  await applyPlan(plan, warehouse, (s) => {
-    done++
-    log(`applying ${done}/${plan.length}: ${s.kind} ${s.object.split('.').pop()}`)
+  let step = 0
+  const applied = await applyPlan(plan, warehouse, (s, skipped) => {
+    step++
+    log(`${skipped ? 'skipping' : 'applying'} ${step}/${plan.length}: ${s.kind} ${s.object.split('.').pop()}${skipped ? ` (${skipped})` : ''}`)
   })
-  return { plan, applied: done }
+  return { plan, applied }
 }
 
 /** Column names and types of a CREATE TABLE statement (top-level columns only). */
