@@ -18,6 +18,7 @@ const ConsoleController = () => import('#controllers/console_controller')
 const TutorController = () => import('#controllers/tutor_controller')
 const AiProController = () => import('#controllers/ai_pro_controller')
 const InsightsController = () => import('#controllers/insights_controller')
+const QuizImpactController = () => import('#controllers/quiz_impact_controller')
 
 const id = { id: router.matchers.number() }
 
@@ -146,6 +147,23 @@ router
         router
           .put('insights/cost-model', [InsightsController, 'updateCostModel'])
           .use(middleware.can(['analytics.cost.read', 'analytics.costs.manage']))
+
+        // Quiz before/after tracking: the release log and the frozen daily metrics
+        router.get('insights/quiz-releases', [QuizImpactController, 'releases']).use(middleware.can(['analytics.read']))
+        router
+          .post('insights/quiz-releases', [QuizImpactController, 'createRelease'])
+          .use(middleware.can(['analytics.read', 'analytics.releases.manage']))
+        router
+          .put('insights/quiz-releases/:id', [QuizImpactController, 'updateRelease'])
+          .where('id', id.id)
+          .use(middleware.can(['analytics.read', 'analytics.releases.manage']))
+        router
+          .delete('insights/quiz-releases/:id', [QuizImpactController, 'deleteRelease'])
+          .where('id', id.id)
+          .use(middleware.can(['analytics.read', 'analytics.releases.manage']))
+        router.get('insights/quiz-metrics', [QuizImpactController, 'metrics']).use(middleware.can(['analytics.read']))
+        router.get('insights/quiz-metrics/series', [QuizImpactController, 'series']).use(middleware.can(['analytics.read']))
+        router.get('insights/quiz-impact', [QuizImpactController, 'impact']).use(middleware.can(['analytics.read']))
 
         // Administration: staff
         router.get('staff', [StaffController, 'index']).use(middleware.can(['console.staff.read']))

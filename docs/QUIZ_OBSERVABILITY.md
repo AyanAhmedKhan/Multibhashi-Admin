@@ -43,6 +43,13 @@ and `metadata` holding ONLY the fields below plus `quiz_id`, `question_id`,
 | `quiz_question_timeout` | — | `had_answer` | Question timer reached 0 |
 | `quiz_paste_blocked` | — | — | Writing paste / large insert blocked |
 
+Every event's metadata also carries the device under the app (RN #45):
+- `os`: `ios`, `android` or `desktop`. `student_sessions.device` says only `web` for every
+  browser, so iPhone Safari fixes are measured with `os:ios`.
+- `in_app: true` inside an app's built-in browser (WhatsApp, Instagram…).
+
+The recording events also come from pronunciation questions (`question_type` says which).
+
 ## 3. Provider usage sync (console-owned table)
 
 `console_ai_provider_daily` — one row per (day, provider, account scope, line item):
@@ -123,3 +130,74 @@ https://cloud.google.com/speech-to-text/pricing.
 - GCP billing export data starts from when it was enabled (2026-10-29) and lags by hours
   to a day.
 - App events exist only from the app release that sends them.
+
+## 7. Before/after tracking for the quiz fixes
+
+Every quiz change is judged the same way: the same metric definitions, over windows on each
+side of the moment the change reached learners. Nothing here changes the quiz backend.
+
+### Release log (`console_quiz_releases`)
+
+One row per change that can move a quiz number: a phase of the Speaking & Writing brief, an
+app fix, the telemetry release, or a confounder (a navigation change, a bulk assignment, a
+scoring change). Each row has the time it reached learners (`deployed_at`, entered in IST),
+whether that time is an estimate (a merge or commit time), the app version that carries it,
+and the metrics it should move (`expects`: metric + up/down/flat). Insights → Quizzes shows
+the log; `analytics.releases.manage` (Super Admin, Platform Admin) edits it; every write is
+audited, and a delete asks for a reason. `quiz:seed-releases` adds the changes made before the
+log existed: 2026-10-28 → 2026-11-16 with estimated times (merge or commit times), then RN #43,
+#44 and #45 at their Vercel production deploy times on 2026-11-23 (23:34–23:35 IST). The app-side
+baseline starts at RN #45.
+
+### Daily metrics (`console_quiz_daily_metrics`)
+
+`quiz:daily-metrics` computes every metric per IST day and segment and stores it as
+(num, den), plus bucket counts for a distribution. A window is SUM(num) / SUM(den), never a
+mean of daily rates, and a percentile comes from the merged buckets. The catalog, with how
+each metric is computed and which brief phase it is evidence for, is `METRICS` in
+`app/services/analytics/quiz_metrics.ts` (definition version 1):
+
+| Source | Metrics (examples) | From |
+|---|---|---|
+| Answer tables | Speaking/Writing answers; past the timer; no speech; empty; under 10 words; short but marked relevant; marking failures; pass rate; words, time and score distributions; evidence-path share and retries | 2026-09-01 (backfill) |
+| Attempts (parent logs) | attempts; finished; finished with Speaking/Writing; left after a timeout | 2026-09-01 |
+| App events (§2) | recording start failures (by error); submit failures (by stage); speech-to-text heard nothing or failed; marking failed; submit → feedback wait; timeouts; stuck after a timeout; re-recordings; recording length; paste blocks | the RN #45 release |
+| Bills (§3–4) | speech-to-text and marking ₹ per day; ₹ per Speaking answer, per marked answer, per answer, per finished attempt; billed seconds per Speaking answer; OpenAI requests and tokens per marked answer | 2026-09-01; `basis` says actual, usage or estimated |
+
+"Stuck after a timeout": an SQ/WQ timeout with no feedback for that question within 10 minutes
+and no other question shown within 30 minutes, in the same attempt.
+
+Segments: `all`; `context:course|webinar|session`; `device:web|ios|android|unknown` (the activity
+session's device); `app:<version>` (from PR #44 on); for events also `os:ios|android|desktop`
+and `in_app:yes`; `error:<code>` and `stage:<stage>` on the failure counts. An answer or attempt
+gets the device of its learner's latest `quiz_start` of that quiz at most 6 h before it
+(`quiz_start` carries no attempt id); unmatched is `device:unknown`.
+
+Not everything should go down: answers that are given enough time (phases 2–3) are longer, so
+₹ per Speaking answer and billed seconds per answer are expected to rise. Those metrics are
+marked `better: context`.
+
+### Freezing
+
+A day is final 3 days after it ends (attempts can finish the next day); a cost day waits for
+the provider's bill and is frozen as an estimate only after 21 days. A run replaces the window's
+non-final rows and leaves final rows as they are, so the "before" a fix is judged against never
+moves. `--force` rewrites final rows too, only after fixing a definition bug; a changed definition
+is a new `DEFINITION_VERSION`, stored beside the old rows.
+
+### Running it
+
+- Once after deploying: `node ace quiz:seed-releases`, then `node ace quiz:daily-metrics --backfill`
+  (2026-09-01 → today, 4 days at a time; off-peak, it reads the live answer tables).
+- Daily at 03:45 IST, after the provider sync: `node ace quiz:daily-metrics` (the last 7 days).
+- `GET /api/insights/quiz-metrics` (status + catalog) and `/api/insights/quiz-metrics/series`
+  (one metric's rows for a segment and window); cost metrics need `analytics.cost.read`.
+
+### Limits
+
+- The answer tables have no created_at index; the loaders find a window by binary search on the
+  primary key, which assumes ids grow with time (true in production, not in the local demo data).
+- Device for answers before RN #45 is only as good as the `quiz_start` match; `os` exists only
+  from RN #45.
+- The 2026-11-16 web fixes (MUL-89–107) shipped before the app events, so their before/after
+  rests on the answer tables only.
