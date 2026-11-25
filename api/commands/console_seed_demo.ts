@@ -1,6 +1,7 @@
 import { BaseCommand, flags } from '@adonisjs/core/ace'
 import type { CommandOptions } from '@adonisjs/core/types/ace'
 import { assertLocalDevDatabase } from '#helpers/dev_guard'
+import { removeQuizDemo, seedQuizDemo } from '#database/dev/quiz_demo'
 
 /**
  * LOCAL ONLY: synthetic demo data so every Insights and AI Pro screen can be seen and
@@ -56,6 +57,9 @@ export default class ConsoleSeedDemo extends BaseCommand {
         )[0]?.total ?? 0
       ) > 0
     const removeAll = async () => {
+      // Quiz answers, logs, questions, cache and demo provider rows (before the lessons go)
+      const demoQuizzes = (await db.from('course_lessons').whereIn('course_id', courseIds).select('quiz_id', 'name')).map((l) => ({ quizId: l.quiz_id, name: l.name }))
+      await removeQuizDemo(db, { firstUser: FIRST_USER, lastUser, quizzes: demoQuizzes })
       const chats = await db.from('ai_tutor_chats').whereBetween('user_id', [FIRST_USER, lastUser]).select('id')
       const chatIds = chats.map((c) => c.id)
       for (let i = 0; i < chatIds.length; i += 500) {
@@ -393,8 +397,18 @@ export default class ConsoleSeedDemo extends BaseCommand {
       }
     }
 
+    // --- quizzes: Speaking/Writing answers, app quiz events (last week), provider rows
+    const quiz = await seedQuizDemo(db, {
+      firstUser: FIRST_USER,
+      lastUser,
+      users,
+      quizzes: lessons.map((l) => ({ quizId: l.quizId, name: l.name })),
+      now,
+      days: DAYS,
+    })
+
     this.logger.success(
-      `Demo data: ${USERS} learners, ${sessions.length} app sessions, ${segments.length} screen visits, ${events.length} events, ${classes} AI tutor classes, ${lessons.length} lessons`
+      `Demo data: ${USERS} learners, ${sessions.length} app sessions, ${segments.length} screen visits, ${events.length} events, ${classes} AI tutor classes, ${lessons.length} lessons, ${quiz.answers} quiz answers (${quiz.events} app quiz events, ${quiz.providerRows} provider rows)`
     )
   }
 }

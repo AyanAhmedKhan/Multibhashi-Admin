@@ -35,6 +35,8 @@ GRANT INSERT, UPDATE ON multibhashi.console_settings TO 'mb_console'@'%';
 GRANT INSERT, UPDATE ON multibhashi.console_ai_pro_grants TO 'mb_console'@'%';
 GRANT INSERT, UPDATE ON multibhashi.console_cost_invoices TO 'mb_console'@'%';
 GRANT INSERT, UPDATE ON multibhashi.console_email_codes TO 'mb_console'@'%';
+-- Provider usage/billing per day for the quizzes (quiz:sync-provider-usage replaces its window).
+GRANT INSERT, UPDATE, DELETE ON multibhashi.console_ai_provider_daily TO 'mb_console'@'%';
 
 -- The audit trail: append and read only, so not even the console can rewrite history.
 GRANT INSERT ON multibhashi.console_audit_logs TO 'mb_console'@'%';

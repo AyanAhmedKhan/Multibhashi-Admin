@@ -1,13 +1,15 @@
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ExternalLink, Pencil, Plus, Receipt } from 'lucide-react'
 import { api } from '../../lib/api'
 import { useAuth } from '../../lib/auth'
 import { fmtDay, fmtInt, fmtMinutes, fmtQuantity, inr } from '../../lib/format'
 import { useReason } from '../../components/dialogs'
-import { Badge, Button, Card, ErrorNote, Field, Input, Modal, Select, Spinner, Stat, Table, Td } from '../../components/ui'
+import { Badge, Button, Card, ErrorNote, Field, Input, Modal, Select, Spinner, Stat, Table, Tabs, Td } from '../../components/ui'
 import { Bars, ChartCard } from '../../components/charts'
+import { QuizCostSection } from './QuizCostSection'
+import { FullBillSection } from './FullBillSection'
 
 type Engine = 'sarvam' | 'global' | 'gemini'
 export interface PriceLine {
@@ -88,7 +90,33 @@ interface ReconRow {
 
 const PROVIDER_NAME: Record<string, string> = { sarvam: 'Sarvam', google: 'Google Gemini', livekit: 'LiveKit', other: 'Other' }
 
+/** Cost & margin: the AI tutor (classes), the quizzes (Speaking and Writing), and the providers' whole bill. */
 export function CostTab({ days }: { days: number }) {
+  const [params, setParams] = useSearchParams()
+  const raw = params.get('section')
+  const section = raw === 'quizzes' || raw === 'bill' ? raw : 'tutor'
+  return (
+    <>
+      <Tabs
+        value={section}
+        onChange={(v) => {
+          const next = new URLSearchParams(params)
+          if (v === 'tutor') next.delete('section')
+          else next.set('section', v)
+          setParams(next)
+        }}
+        items={[
+          { value: 'tutor', label: 'AI tutor' },
+          { value: 'quizzes', label: 'Quizzes' },
+          { value: 'bill', label: 'Full bill' },
+        ]}
+      />
+      {section === 'quizzes' ? <QuizCostSection days={days} /> : section === 'bill' ? <FullBillSection days={days} /> : <TutorCost days={days} />}
+    </>
+  )
+}
+
+function TutorCost({ days }: { days: number }) {
   const { can } = useAuth()
   const q = useQuery({ queryKey: ['insights-cost', days], queryFn: () => api.get<CostInsights>('insights/cost', { days }) })
   const recon = useQuery({ queryKey: ['insights-recon'], queryFn: () => api.get<ReconRow[]>('insights/reconciliation') })

@@ -144,6 +144,11 @@ export const invoiceValidator = vine.compile(
   })
 )
 
+/** Refresh the quiz providers' usage and billing for the last N IST days. */
+export const providerRefreshValidator = vine.compile(
+  vine.object({ days: vine.number().withoutDecimals().min(1).max(90).optional() })
+)
+
 export const costModelValidator = vine.compile(
   vine.object({ model: vine.any(), reason: reason() })
 )

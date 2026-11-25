@@ -20,6 +20,11 @@ import type { ApiClient, ApiRequest } from '@japa/api-client'
 const ORIGIN = consoleConfig.origins[0]
 const LEARNER = 2001
 const PASSWORD = 'correct horse battery staple'
+const QUIZ_ID = 910_101
+const QUIZ_SQ = 9_610_001
+const QUIZ_WQ = 9_610_002
+/** Written into a test answer: it must never come back from any endpoint. */
+const ANSWER_MARKER = 'Zebrafishmarker'
 
 interface Session {
   cookie: string
@@ -49,6 +54,12 @@ async function cleanup() {
   await db.from('ai_tutor_session_summaries').where('user_id', LEARNER).delete()
   await db.from('ai_tutor_learner_memories').where('user_id', LEARNER).delete()
   if (chats.length) await db.from('ai_tutor_chats').where('user_id', LEARNER).delete()
+  // Quiz answers of the test learner (quiz observability test)
+  const quizLogs = (await db.from('user_quiz_logs').where('user_id', LEARNER).select('id')).map((r) => r.id)
+  if (quizLogs.length) await db.from('user_quiz_log_details').whereIn('user_quiz_log_id', quizLogs).delete()
+  await db.from('user_quiz_logs').where('user_id', LEARNER).delete()
+  await db.from('quiz_questions').whereIn('id', [QUIZ_SQ, QUIZ_WQ]).delete()
+  await db.from('quizzes').where('id', QUIZ_ID).delete()
   await db.from('users').where('id', LEARNER).delete()
 }
 
@@ -592,6 +603,71 @@ test.group('Console end to end', (group) => {
       await setMfaMethod('totp')
     }
   }).timeout(60_000)
+
+  test('quizzes and the full bill: figures without answer text, permissions, Refresh when not connected', async ({ client, assert }) => {
+    const a = await invitedUser('quiz-owner@test.local', 'super_admin')
+    await completeSetup(client, a.token)
+    const owner = await signIn(client, 'quiz-owner@test.local', a.user.id)
+    const o = await invitedUser('quiz-ops@test.local', 'ops_manager')
+    await completeSetup(client, o.token)
+    const ops = await signIn(client, 'quiz-ops@test.local', o.user.id)
+
+    // One Speaking and one Writing answer for the test learner, today
+    await db.table('quizzes').insert({ id: QUIZ_ID, name: 'Test quiz' })
+    await db.table('quiz_questions').multiInsert([
+      { id: QUIZ_SQ, quiz_id: QUIZ_ID, type_code: 'SQ' },
+      { id: QUIZ_WQ, quiz_id: QUIZ_ID, type_code: 'WQ' },
+    ])
+    const now = Date.now()
+    const [logId] = await db.table('user_quiz_logs').insert({ user_id: LEARNER, quiz_id: QUIZ_ID, created_at: new Date(now) })
+    await db.table('user_quiz_log_details').multiInsert([
+      {
+        user_quiz_log_id: logId, quiz_question_id: QUIZ_SQ, question_start_timestamp: now - 60_000, question_end_timestamp: now - 30_000,
+        answer: `My name is ${ANSWER_MARKER}. I work in a bank and I like my job.`, relevance_score: 8, grammar_score: 7, is_correct: 1, finished_on_time: 1, created_at: new Date(now),
+      },
+      {
+        user_quiz_log_id: logId, quiz_question_id: QUIZ_WQ, question_start_timestamp: now - 20_000, question_end_timestamp: now - 1000,
+        answer: `Dear team, ${ANSWER_MARKER} here. Thank you for the course.`, scoring_version: 3, prompt_version: 'english-evidence-v4', evaluation_status: 'ok',
+        evaluation_json: JSON.stringify({ evidence_review: { diagnostics: [{ stage: 'review_2', issue: ANSWER_MARKER }] } }), relevance_score: 6, grammar_score: 5, created_at: new Date(now),
+      },
+    ])
+
+    const insights = await as(client, owner, 'get', '/api/insights/quizzes?days=7')
+    insights.assertStatus(200)
+    assert.isAtLeast(insights.body().totals.sq, 1)
+    assert.isAtLeast(insights.body().totals.wq, 1)
+    assert.isAtLeast(insights.body().retries.retried, 1, 'a review_2 stage is a retry')
+    const cost = await as(client, owner, 'get', '/api/insights/quiz-cost?days=7')
+    cost.assertStatus(200)
+    assert.isAbove(cost.body().perAnswer.SQ.count, 0)
+    assert.isAbove(cost.body().perAnswer.SQ.mean, 0)
+    assert.isAbove(cost.body().perAnswer.WQ.count, 0)
+    assert.isArray(cost.body().topQuizzes)
+    const bill = await as(client, owner, 'get', '/api/insights/full-bill?days=7')
+    bill.assertStatus(200)
+    assert.property(bill.body().window.split, 'quizzes')
+    for (const res of [insights, cost, bill]) assert.notInclude(JSON.stringify(res.body()), ANSWER_MARKER, 'answer text never leaves the database')
+
+    // Cost needs its own permission; ops sees quiz quality but not cost or the bill
+    ;(await as(client, ops, 'get', '/api/insights/quizzes?days=7')).assertStatus(200)
+    ;(await as(client, ops, 'get', '/api/insights/quiz-cost?days=7')).assertStatus(403)
+    ;(await as(client, ops, 'get', '/api/insights/full-bill?days=7')).assertStatus(403)
+    ;(await as(client, ops, 'post', '/api/insights/quiz-providers/refresh').json({ days: 3 })).assertStatus(403)
+
+    // Refresh without credentials: a "not connected" status, not an error, and audited
+    const providers = await as(client, owner, 'get', '/api/insights/quiz-providers')
+    providers.assertStatus(200)
+    if (!providers.body().openai.connected && !providers.body().google.connected) {
+      const refresh = await as(client, owner, 'post', '/api/insights/quiz-providers/refresh').json({ days: 3 })
+      refresh.assertStatus(200)
+      assert.deepEqual(refresh.body().result.openai, { connected: false, missing: ['OPENAI_ADMIN_KEY'] })
+      assert.isFalse(refresh.body().result.google.connected)
+      assert.notInclude(JSON.stringify(refresh.body()), 'private_key')
+      const audit = await db.from('console_audit_logs').where('actor_id', a.user.id).where('action', 'analytics.provider_usage.refreshed').first()
+      assert.exists(audit)
+      ;(await as(client, owner, 'post', '/api/insights/quiz-providers/refresh').json({ days: 500 })).assertStatus(422)
+    }
+  }).timeout(90_000)
 
   test('learner names: the app placeholder, a CRM enquiry name, and renaming', async ({ client, assert }) => {
     const a = await invitedUser('names-owner@test.local', 'super_admin')

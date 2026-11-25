@@ -89,6 +89,11 @@ erase). The demo/dev commands and the test suite refuse to run against a non-loc
   `MAIL_FROM="MultiBhashi Console <the Gmail address>"`. System health shows whether it
   connects. Until SMTP is set, production uses the authenticator app instead of email codes.
 - Run `console:sync-roles` after every deploy that changes `app/rbac/roles.ts`.
+- Provider billing (Cost → Quizzes and Full bill, docs/QUIZ_OBSERVABILITY.md): set
+  `OPENAI_ADMIN_KEY` and `GCP_BILLING_CREDENTIALS_JSON` + `GCP_BILLING_EXPORT_TABLE` (and the
+  attribution ids) in `deploy/.env.production`, then sync daily from the host's crontab:
+  `15 3 * * * cd /opt/multibhashi-admin && docker compose -f deploy/docker-compose.yml exec -T admin-api node ace quiz:sync-provider-usage --days 7`.
+  Without them the pages say "not connected" and the quiz figures are estimates.
 - `console:dev-schema` and `console:seed-demo` refuse to run unless `NODE_ENV=development`
   and the database is on localhost.
 "# Multibhashi-Admin" 

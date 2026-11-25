@@ -1,0 +1,65 @@
+{
+  "object": "page",
+  "data": [
+    {
+      "object": "bucket",
+      "start_time": 1793059200,
+      "end_time": 1793145600,
+      "results": [
+        {
+          "object": "organization.costs.result",
+          "amount": { "value": 0.015, "currency": "usd" },
+          "line_item": "gpt-4o-mini-2024-07-18, input",
+          "project_id": "proj_quizbackend",
+          "api_key_id": null,
+          "user_id": null,
+          "api_source": null,
+          "quantity": 100000,
+          "quantity_unit": "tokens"
+        },
+        {
+          "object": "organization.costs.result",
+          "amount": { "value": 0.0015, "currency": "usd" },
+          "line_item": "gpt-4o-mini-2024-07-18, cached input",
+          "project_id": "proj_quizbackend",
+          "api_key_id": null,
+          "user_id": null,
+          "api_source": null,
+          "quantity": 20000,
+          "quantity_unit": "tokens"
+        },
+        {
+          "object": "organization.costs.result",
+          "amount": { "value": 0.0054, "currency": "usd" },
+          "line_item": "gpt-4o-mini-2024-07-18, output",
+          "project_id": "proj_quizbackend",
+          "api_key_id": null,
+          "user_id": null,
+          "api_source": null,
+          "quantity": 9000,
+          "quantity_unit": "tokens"
+        }
+      ]
+    },
+    {
+      "object": "bucket",
+      "start_time": 1793145600,
+      "end_time": 1793232000,
+      "results": [
+        {
+          "object": "organization.costs.result",
+          "amount": { "value": 0.06, "currency": "usd" },
+          "line_item": null,
+          "project_id": null,
+          "api_key_id": null,
+          "user_id": null,
+          "api_source": null,
+          "quantity": null,
+          "quantity_unit": null
+        }
+      ]
+    }
+  ],
+  "has_more": false,
+  "next_page": null
+}

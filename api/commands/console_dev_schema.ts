@@ -27,6 +27,15 @@ export default class ConsoleDevSchema extends BaseCommand {
     if (names.includes('name') && !names.includes('title')) {
       await db.rawQuery('ALTER TABLE courses CHANGE name title VARCHAR(255) NULL')
     }
+    // Older local copies of student_activity_events lack the attribution columns the
+    // backend writes (ActivityController.recordEvents); add them in place.
+    const [eventColumns] = await db.rawQuery(
+      "SELECT COLUMN_NAME AS c FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'student_activity_events'"
+    )
+    const have = new Set((eventColumns as { c: string }[]).map((r) => r.c))
+    for (const column of ['webinar_class_id', 'session_call_id', 'course_booking_id', 'course_lesson_id', 'user_quiz_log_id']) {
+      if (!have.has(column)) await db.rawQuery(`ALTER TABLE student_activity_events ADD COLUMN ${column} INT UNSIGNED NULL AFTER context_type`)
+    }
     this.logger.success(`Applied ${statements.length} CREATE TABLE IF NOT EXISTS statements`)
   }
 }
