@@ -182,12 +182,21 @@ list. `--dry-run` prints the subject, text and HTML instead of sending; `--sampl
 example numbers, to preview the layout without BigQuery. When product analytics isn't
 connected it sends nothing.
 
-## 5. Schedule (host crontab, IST)
+## 5. Schedule (host crontab)
+
+The Hostinger server's clock is **UTC**, and the stack runs as compose project
+`multibhashi-admin` (the same `-p` the quiz cron lines use). The times below are UTC; IST is
+shown next to them. They run before the quiz jobs (21:45 and 22:15 UTC).
 
 ```
-30 2 * * *  cd /opt/multibhashi-admin && docker compose -f deploy/docker-compose.yml exec -T admin-api node ace analytics:export-facts
-0 3 * * *   cd /opt/multibhashi-admin && docker compose -f deploy/docker-compose.yml exec -T admin-api node ace analytics:models
-0 9 * * 1   cd /opt/multibhashi-admin && docker compose -f deploy/docker-compose.yml exec -T admin-api node ace analytics:weekly-digest
+# 02:00 IST: deletions (see §6)
+30 20 * * *  cd /opt/multibhashi-admin && docker compose -p multibhashi-admin -f deploy/docker-compose.yml exec -T admin-api node ace analytics:forget-user --scheduled >> /var/log/mb-admin-analytics-forget.log 2>&1
+# 02:30 IST: business facts
+0 21 * * *   cd /opt/multibhashi-admin && docker compose -p multibhashi-admin -f deploy/docker-compose.yml exec -T admin-api node ace analytics:export-facts >> /var/log/mb-admin-analytics-facts.log 2>&1
+# 03:00 IST: models
+30 21 * * *  cd /opt/multibhashi-admin && docker compose -p multibhashi-admin -f deploy/docker-compose.yml exec -T admin-api node ace analytics:models >> /var/log/mb-admin-analytics-models.log 2>&1
+# Monday 09:00 IST: weekly digest
+30 3 * * 1   cd /opt/multibhashi-admin && docker compose -p multibhashi-admin -f deploy/docker-compose.yml exec -T admin-api node ace analytics:weekly-digest >> /var/log/mb-admin-analytics-digest.log 2>&1
 ```
 
 The first time:
@@ -246,9 +255,7 @@ hours ago), so events from today and yesterday (IST) are left for the next run.
 `analytics:forget-user --scheduled` does that run: daily, it re-runs every request from the
 last 7 days and forgets accounts that sign-in v2 marked `deleted` in that time.
 
-```
-0 2 * * *  cd /opt/multibhashi-admin && docker compose -f deploy/docker-compose.yml exec -T admin-api node ace analytics:forget-user --scheduled
-```
+It runs from the host crontab at 20:30 UTC (02:00 IST); the line is in §5.
 
 **Not covered here** (app and legal side of MUL-153): the notice and the toggle in the app, the
 legal review, Clarity masking, and a retention policy for the MySQL activity tables
