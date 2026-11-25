@@ -10,6 +10,12 @@ import { EngagementTab } from './EngagementTab'
 import { TutorTab } from './TutorTab'
 import { CostTab } from './CostTab'
 import { QuizzesTab } from './QuizzesTab'
+import { ProductOverviewTab } from './product/ProductOverviewTab'
+import { ScreensTab } from './product/ScreensTab'
+import { FeaturesTab } from './product/FeaturesTab'
+import { FunnelsTab } from './product/FunnelsTab'
+import { RetentionTab } from './product/RetentionTab'
+import { HealthTab } from './product/HealthTab'
 
 export function useDays() {
   const [params, setParams] = useSearchParams()
@@ -54,19 +60,42 @@ export function InsightsPage() {
   const { tab = 'users' } = useParams()
   const { can } = useAuth()
   const [days, setDays] = useDays()
-  const tabs: { key: string; label: string; show: boolean; node: ReactNode }[] = [
-    { key: 'users', label: 'Users & growth', show: true, node: <UsersTab days={days} /> },
-    { key: 'engagement', label: 'Screens & content', show: true, node: <EngagementTab days={days} /> },
-    { key: 'ai', label: 'AI tutor usage', show: true, node: <TutorTab days={days} /> },
-    { key: 'quizzes', label: 'Quizzes', show: true, node: <QuizzesTab days={days} /> },
-    { key: 'cost', label: 'Cost & margin', show: can('analytics.cost.read'), node: <CostTab days={days} /> },
+  const tabs: { key: string; label: string; show: boolean; group: 'activity' | 'product'; node: ReactNode }[] = [
+    { key: 'users', label: 'Users & growth', show: true, group: 'activity', node: <UsersTab days={days} /> },
+    { key: 'engagement', label: 'Screens & content', show: true, group: 'activity', node: <EngagementTab days={days} /> },
+    { key: 'ai', label: 'AI tutor usage', show: true, group: 'activity', node: <TutorTab days={days} /> },
+    { key: 'quizzes', label: 'Quizzes', show: true, group: 'activity', node: <QuizzesTab days={days} /> },
+    { key: 'cost', label: 'Cost & margin', show: can('analytics.cost.read'), group: 'activity', node: <CostTab days={days} /> },
+    // Product analytics: the app's own events in BigQuery, modelled nightly (MUL-152).
+    { key: 'overview', label: 'Overview', show: true, group: 'product', node: <ProductOverviewTab days={days} /> },
+    { key: 'screens', label: 'Screens', show: true, group: 'product', node: <ScreensTab days={days} /> },
+    { key: 'features', label: 'Features', show: true, group: 'product', node: <FeaturesTab days={days} /> },
+    { key: 'funnels', label: 'Funnels', show: true, group: 'product', node: <FunnelsTab days={days} /> },
+    { key: 'retention', label: 'Retention', show: true, group: 'product', node: <RetentionTab days={days} /> },
+    { key: 'health', label: 'Health', show: true, group: 'product', node: <HealthTab days={days} /> },
   ]
   const current = tabs.find((t) => t.key === tab && t.show) ?? tabs[0]
+  const tabLink = (t: (typeof tabs)[number]) => (
+    <NavLink
+      key={t.key}
+      to={`/insights/${t.key}?days=${days}`}
+      className={cx(
+        'whitespace-nowrap rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
+        current.key === t.key ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
+      )}
+    >
+      {t.label}
+    </NavLink>
+  )
   return (
     <>
       <PageHeader
         title="Insights"
-        subtitle="Aggregates across all learners (no personal data). IST days. Data from the app’s activity tracking, quiz answers and the AI tutor."
+        subtitle={
+          current.group === 'product'
+            ? 'Product analytics: the app’s own events in BigQuery, modelled every night (up to yesterday, IST). Aggregates across all learners.'
+            : 'Aggregates across all learners (no personal data). IST days. Data from the app’s activity tracking, quiz answers and the AI tutor.'
+        }
         actions={
           <Select aria-label="Period" className="w-40" value={String(days)} onChange={(e) => setDays(Number(e.target.value))}>
             <option value="7">Last 7 days</option>
@@ -77,21 +106,13 @@ export function InsightsPage() {
         }
       />
       <Highlights />
-      <div className="mb-6 inline-flex max-w-full gap-1 overflow-x-auto rounded-lg bg-muted p-1" role="tablist">
-        {tabs
-          .filter((t) => t.show)
-          .map((t) => (
-            <NavLink
-              key={t.key}
-              to={`/insights/${t.key}?days=${days}`}
-              className={cx(
-                'whitespace-nowrap rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
-                current.key === t.key ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
-              )}
-            >
-              {t.label}
-            </NavLink>
-          ))}
+      <div className="mb-6 inline-flex max-w-full items-center gap-1 overflow-x-auto rounded-lg bg-muted p-1" role="tablist">
+        {tabs.filter((t) => t.show && t.group === 'activity').map(tabLink)}
+        <span className="mx-1 h-5 w-px shrink-0 bg-border" aria-hidden />
+        <span className="whitespace-nowrap px-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground" title="The app's own events in BigQuery, modelled nightly">
+          Product analytics
+        </span>
+        {tabs.filter((t) => t.show && t.group === 'product').map(tabLink)}
       </div>
       {current.node}
     </>

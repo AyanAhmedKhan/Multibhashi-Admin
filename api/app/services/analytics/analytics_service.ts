@@ -9,6 +9,7 @@ import {
   istHourSql,
   istWeekdaySql,
 } from '#helpers/ist'
+import { orderedFunnel, type FunnelStep } from '#services/analytics/funnel'
 
 /**
  * Insights. Aggregates only (no names, phones or emails), from:
@@ -22,9 +23,34 @@ import {
 const CACHE_MS = 120_000
 const LIVE_HEARTBEAT_MS = 90_000
 const MAX_INTERVALS = 300_000
+const MAX_FUNNEL_EVENTS = 300_000
+/** The learning funnel counts a step only within this many days of the run's first step. */
+export const FUNNEL_WINDOW_DAYS = 7
+const FUNNEL_STEPS: FunnelStep[] = [
+  { step: 'Opened the app', types: ['app_open'] },
+  { step: 'Opened a lesson', types: ['lessons_open', 'pdf_open'] },
+  { step: 'Started a quiz', types: ['quiz_start'] },
+  // quiz_completed: the last answer saved. quiz_end (renamed quiz_screen_left)
+  // fired whenever the quiz screen closed, finished or not (MUL-143).
+  { step: 'Finished a quiz', types: ['quiz_completed'] },
+  { step: 'Talked to the AI tutor', types: ['ai_tutor_message'] },
+]
 
 const conn = () => db.connection('analytics')
 const n = (v: unknown) => Number(v ?? 0)
+
+/**
+ * Sign-ups: users rows that have signed in at least once. The monolith creates a
+ * users row when the OTP is sent (/webapp/lead, INT-04), before it is verified,
+ * so counting every row counted OTP requests. An app session (student_sessions,
+ * recorded since 2026-05-25) needs a verified sign-in. Until the sign-in rework
+ * creates accounts only after verification (MUL-131), this is the verified count
+ * (MUL-143).
+ */
+const verifiedUsers = () =>
+  conn()
+    .from('users')
+    .whereExists((q) => q.from('student_sessions').whereRaw('student_sessions.user_id = users.id'))
 
 const PAID_SOURCES = ['single_purchase', 'extend', 'package', 'purchase']
 const COMP_SOURCES = ['manual_grant', 'console_grant', 'console_ai_pro']
@@ -62,13 +88,12 @@ class AnalyticsService {
       const [totalUsers, signups, signupsPrev, dauRows, activeNow, wau, mau, dauToday, periodActive, prevActive, devices, versions, heat] =
         await Promise.all([
           conn().from('users').count('* as total').first(),
-          conn()
-            .from('users')
+          verifiedUsers()
             .where('created_at', '>=', new Date(since))
             .groupByRaw('DATE(created_at)')
             .select(conn().raw('DATE_FORMAT(created_at, "%Y-%m-%d") as day'))
             .count('* as total'),
-          conn().from('users').where('created_at', '>=', new Date(prevSince)).where('created_at', '<', new Date(since)).count('* as total').first(),
+          verifiedUsers().where('created_at', '>=', new Date(prevSince)).where('created_at', '<', new Date(since)).count('* as total').first(),
           conn()
             .from('student_sessions')
             .where('started_at', '>=', since)
@@ -193,8 +218,9 @@ class AnalyticsService {
     const weekStart = (week: number) => istDayStart(week * 7 - 3)
     const thisWeek = weekOf(istDayOf(Date.now()))
     const firstWeek = thisWeek - weeks + 1
-    const cohortUsers = await conn()
-      .from('users')
+    // Verified sign-ups only: an unverified OTP request never opens the app, and
+    // counting it in the cohort understated every week's retention.
+    const cohortUsers = await verifiedUsers()
       .where('created_at', '>=', new Date(weekStart(firstWeek)))
       .select('id', 'created_at')
     if (!cohortUsers.length) return []
@@ -277,8 +303,10 @@ class AnalyticsService {
         conn()
           .from('student_activity_events')
           .where('created_at_ms', '>=', since)
-          .whereIn('event_type', ['app_open', 'lessons_open', 'pdf_open', 'quiz_start', 'quiz_end', 'ai_tutor_message'])
-          .distinct('user_id', 'event_type'),
+          .whereIn('event_type', FUNNEL_STEPS.flatMap((s) => s.types))
+          .select('user_id', 'event_type', 'created_at_ms')
+          .orderBy('created_at_ms')
+          .limit(MAX_FUNNEL_EVENTS),
         conn().from('student_daily_activity').max('activity_date as last').first(),
         conn()
           .from('student_learning_segments')
@@ -287,21 +315,12 @@ class AnalyticsService {
           .count('* as total')
           .first(),
       ])
-      // A funnel step counts learners who also did every earlier step, so it never grows.
-      const did = (types: string[]) => new Set(funnel.filter((f) => types.includes(f.event_type)).map((f) => f.user_id as number))
-      const steps: [string, string[]][] = [
-        ['Opened the app', ['app_open']],
-        ['Opened a lesson', ['lessons_open', 'pdf_open']],
-        ['Started a quiz', ['quiz_start']],
-        ['Finished a quiz', ['quiz_end']],
-        ['Talked to the AI tutor', ['ai_tutor_message']],
-      ]
-      let cohort: Set<number> | null = null
-      const funnelSteps = steps.map(([step, types]) => {
-        const users = did(types)
-        cohort = cohort ? new Set([...cohort].filter((u) => users.has(u))) : users
-        return { step, users: cohort.size }
-      })
+      // Ordered and windowed: each step after the one before, within FUNNEL_WINDOW_DAYS.
+      const funnelSteps = orderedFunnel(
+        funnel.map((f) => ({ userId: n(f.user_id), type: f.event_type, at: n(f.created_at_ms) })),
+        FUNNEL_STEPS,
+        FUNNEL_WINDOW_DAYS * DAY_MS
+      )
       return {
         screens: screens
           .map((s) => {
@@ -337,6 +356,9 @@ class AnalyticsService {
           }
         }),
         funnel: funnelSteps,
+        funnelWindowDays: FUNNEL_WINDOW_DAYS,
+        // More events than were read: the funnel covers only the earliest part of the period.
+        funnelTruncated: funnel.length >= MAX_FUNNEL_EVENTS,
         freshness: {
           lastRollupDay: freshness?.last ? DateTime.fromJSDate(new Date(freshness.last)).toISODate() : null,
           stuckSegments: n(stuck?.total),

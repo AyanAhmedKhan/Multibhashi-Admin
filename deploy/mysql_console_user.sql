@@ -38,6 +38,10 @@ GRANT INSERT, UPDATE ON multibhashi.console_email_codes TO 'mb_console'@'%';
 -- Provider usage/billing per day for the quizzes (quiz:sync-provider-usage replaces its window).
 GRANT INSERT, UPDATE, DELETE ON multibhashi.console_ai_provider_daily TO 'mb_console'@'%';
 
+-- Product analytics deletion requests (analytics:forget-user): append only, so a request
+-- can't be undone by the console; the facts export reads it to keep forgotten learners out.
+GRANT INSERT ON multibhashi.console_analytics_forgotten TO 'mb_console'@'%';
+
 -- The audit trail: append and read only, so not even the console can rewrite history.
 GRANT INSERT ON multibhashi.console_audit_logs TO 'mb_console'@'%';
 GRANT UPDATE ON multibhashi.console_audit_head TO 'mb_console'@'%';

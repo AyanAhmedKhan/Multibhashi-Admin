@@ -2,6 +2,7 @@ import vine from '@vinejs/vine'
 import { LEARNER_NAME } from '#helpers/learner_name'
 import { METRICS } from '#services/analytics/quiz_metrics'
 import { DIRECTIONS, RELEASE_KINDS, RELEASE_PHASES, RELEASE_SURFACES } from '#services/analytics/quiz_releases'
+import { FUNNELS } from '#services/product_analytics/catalog'
 
 /**
  * Every sensitive read and every write asks "why?". The reason is stored in the audit
@@ -214,6 +215,19 @@ export const quizMetricSeriesValidator = vine.compile(
     segment: vine.string().trim().maxLength(64).optional(),
     from: vine.string().trim().regex(DAY_LABEL),
     to: vine.string().trim().regex(DAY_LABEL),
+  })
+)
+
+/** Insights → product analytics pages (MUL-152). */
+export const productInsightsValidator = vine.compile(
+  vine.object({
+    days: vine.number().withoutDecimals().in([7, 14, 30, 90]).optional(),
+    breakdown: vine.enum(['platform', 'channel', 'app_version'] as const).optional(),
+    funnel: vine.enum(FUNNELS.map((f) => f.key)).optional(),
+    step: vine.number().withoutDecimals().min(1).max(10).optional(),
+    basis: vine.enum(['signup', 'first_seen'] as const).optional(),
+    channel: vine.string().trim().maxLength(100).optional(),
+    feature: vine.string().trim().maxLength(40).optional(),
   })
 )
 
