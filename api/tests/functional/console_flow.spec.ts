@@ -723,4 +723,122 @@ test.group('Console end to end', (group) => {
     locked.assertStatus(423)
     assert.equal(locked.body().error.code, 'LOCKED')
   }).timeout(60_000)
+
+  test('quiz release log and stored daily metrics: edit rights, audit, cost gated', async ({ client, assert }) => {
+    const TITLE = 'Test change (functional test)'
+    const DAY = '2000-01-03'
+    await db.from('console_quiz_releases').where('title', 'like', 'Test change%').delete()
+    await db.from('console_quiz_daily_metrics').where('day', '>=', '1999-12-01').where('day', '<=', '2000-02-28').delete()
+    try {
+      const a = await invitedUser('release-owner@test.local', 'super_admin')
+      await completeSetup(client, a.token)
+      const owner = await signIn(client, 'release-owner@test.local', a.user.id)
+      const o = await invitedUser('release-ops@test.local', 'ops_manager')
+      await completeSetup(client, o.token)
+      const ops = await signIn(client, 'release-ops@test.local', o.user.id)
+
+      const body = {
+        title: TITLE,
+        phase: '1',
+        kind: 'fix',
+        surface: 'app_web',
+        ticket: 'MUL-999',
+        deployed_at: '2026-11-25T18:30:00+05:30',
+        deployed_estimated: true,
+        expects: [{ metric: 'ev_timeout_stuck_share', direction: 'down' }],
+      }
+      // Validation: an unknown metric or a bad time is refused
+      ;(await as(client, owner, 'post', '/api/insights/quiz-releases').json({ ...body, expects: [{ metric: 'no_such_metric', direction: 'down' }] })).assertStatus(422)
+      ;(await as(client, owner, 'post', '/api/insights/quiz-releases').json({ ...body, deployed_at: '25/11/2026' })).assertStatus(422)
+
+      const created = await as(client, owner, 'post', '/api/insights/quiz-releases').json(body)
+      created.assertStatus(200)
+      const release = created.body().release
+      assert.equal(release.title, TITLE)
+      assert.equal(release.deployedAt, '2026-11-25T13:00:00.000Z', 'stored as the same instant')
+      assert.isTrue(release.deployedEstimated)
+      assert.deepEqual(release.expects, body.expects)
+
+      // Anyone with Insights can read the log; only the release permission edits it
+      const list = await as(client, ops, 'get', '/api/insights/quiz-releases')
+      list.assertStatus(200)
+      assert.isTrue(list.body().releases.some((r: { id: number }) => r.id === release.id))
+      ;(await as(client, ops, 'post', '/api/insights/quiz-releases').json(body)).assertStatus(403)
+      ;(await as(client, ops, 'put', `/api/insights/quiz-releases/${release.id}`).json(body)).assertStatus(403)
+
+      const updated = await as(client, owner, 'put', `/api/insights/quiz-releases/${release.id}`).json({ ...body, deployed_at: null })
+      updated.assertStatus(200)
+      assert.isNull(updated.body().release.deployedAt)
+      assert.isFalse(updated.body().release.deployedEstimated, 'not live yet cannot be "estimated"')
+
+      // Deleting asks why; every write is in the audit log
+      ;(await as(client, owner, 'delete', `/api/insights/quiz-releases/${release.id}`).json({})).assertStatus(422)
+      ;(await as(client, owner, 'delete', `/api/insights/quiz-releases/${release.id}`).json({ reason: 'logged by mistake' })).assertStatus(200)
+      ;(await as(client, owner, 'delete', `/api/insights/quiz-releases/${release.id}`).json({ reason: 'logged by mistake' })).assertStatus(404)
+      const audit = await db.from('console_audit_logs').where('target_type', 'quiz_release').where('target_id', String(release.id)).orderBy('id', 'asc').select('action', 'reason')
+      assert.deepEqual(
+        audit.map((r) => r.action),
+        ['analytics.quiz_release.created', 'analytics.quiz_release.updated', 'analytics.quiz_release.deleted']
+      )
+      assert.equal(audit[2].reason, 'logged by mistake')
+
+      // Stored metrics: cost series need the cost permission
+      await db.table('console_quiz_daily_metrics').multiInsert([
+        { day: DAY, metric: 'sq_answers', segment: 'all', definition_version: 1, num: 12, den: 0, final: true, computed_at: new Date() },
+        { day: DAY, metric: 'sq_no_speech_share', segment: 'device:web', definition_version: 1, num: 3, den: 12, final: true, computed_at: new Date() },
+        { day: DAY, metric: 'cost_speech_inr', segment: 'all', definition_version: 1, num: 7.5, den: 1, basis: 'actual', final: true, computed_at: new Date() },
+      ])
+      const info = await as(client, ops, 'get', '/api/insights/quiz-metrics')
+      info.assertStatus(200)
+      assert.isAbove(info.body().status.days, 0)
+      assert.isFalse(info.body().metrics.some((m: { source: string }) => m.source === 'bills'), 'no cost metrics without the cost permission')
+      const ownerInfo = await as(client, owner, 'get', '/api/insights/quiz-metrics')
+      assert.isTrue(ownerInfo.body().metrics.some((m: { key: string }) => m.key === 'cost_speech_per_sq_inr'))
+
+      const series = await as(client, ops, 'get', `/api/insights/quiz-metrics/series?metric=sq_no_speech_share&segment=device:web&from=${DAY}&to=${DAY}`)
+      series.assertStatus(200)
+      assert.deepEqual(series.body().rows, [{ day: DAY, num: 3, den: 12, hist: null, basis: null, final: true }])
+      assert.isTrue(series.body().segments.some((s: { segment: string }) => s.segment === 'device:web'))
+      ;(await as(client, ops, 'get', `/api/insights/quiz-metrics/series?metric=cost_speech_inr&from=${DAY}&to=${DAY}`)).assertStatus(403)
+      const cost = await as(client, owner, 'get', `/api/insights/quiz-metrics/series?metric=cost_speech_inr&from=${DAY}&to=${DAY}`)
+      cost.assertStatus(200)
+      assert.equal(cost.body().rows[0].basis, 'actual')
+      ;(await as(client, owner, 'get', `/api/insights/quiz-metrics/series?metric=no_such_metric&from=${DAY}&to=${DAY}`)).assertStatus(422)
+
+      // Before vs after a change: windows around its deploy day, cost rows only with the cost permission
+      const liveChange = await as(client, owner, 'post', '/api/insights/quiz-releases').json({
+        title: 'Test change (impact)',
+        kind: 'fix',
+        surface: 'app_web',
+        deployed_at: '2000-01-15T12:00:00+05:30',
+        expects: [{ metric: 'sq_no_speech_share', direction: 'down' }],
+      })
+      liveChange.assertStatus(200)
+      const impactRows = []
+      for (let i = 1; i <= 28; i++) {
+        const before = new Date(Date.UTC(2000, 0, 15 - i)).toISOString().slice(0, 10)
+        impactRows.push({ day: before, metric: 'sq_no_speech_share', segment: 'all', definition_version: 1, num: 60, den: 1000, final: true, computed_at: new Date() })
+        impactRows.push({ day: before, metric: 'cost_speech_per_sq_inr', segment: 'all', definition_version: 1, num: 1300, den: 2000, basis: 'actual', final: true, computed_at: new Date() })
+      }
+      for (let i = 3; i < 17; i++) {
+        const after = new Date(Date.UTC(2000, 0, 15 + i)).toISOString().slice(0, 10)
+        impactRows.push({ day: after, metric: 'sq_no_speech_share', segment: 'all', definition_version: 1, num: 20, den: 1000, final: true, computed_at: new Date() })
+      }
+      await db.table('console_quiz_daily_metrics').multiInsert(impactRows)
+      const impact = await as(client, ops, 'get', `/api/insights/quiz-impact?release=${liveChange.body().release.id}&window=28`)
+      impact.assertStatus(200)
+      assert.deepEqual(impact.body().windows.before, { from: '1999-12-18', to: '2000-01-14', days: 28 })
+      const noSpeech = impact.body().metrics.find((m: { key: string }) => m.key === 'sq_no_speech_share')
+      assert.equal(noSpeech.expected, 'down')
+      assert.equal(noSpeech.verdict, 'better')
+      assert.isFalse(impact.body().metrics.some((m: { source: string }) => m.source === 'bills'), 'no cost rows without the cost permission')
+      const ownerImpact = await as(client, owner, 'get', `/api/insights/quiz-impact?release=${liveChange.body().release.id}`)
+      assert.isTrue(ownerImpact.body().metrics.some((m: { key: string }) => m.key === 'cost_speech_per_sq_inr'))
+      ;(await as(client, owner, 'get', '/api/insights/quiz-impact?release=999999999')).assertStatus(404)
+      ;(await as(client, owner, 'get', `/api/insights/quiz-impact?release=${liveChange.body().release.id}&window=10`)).assertStatus(422)
+    } finally {
+      await db.from('console_quiz_releases').where('title', 'like', 'Test change%').delete()
+      await db.from('console_quiz_daily_metrics').where('day', '>=', '1999-12-01').where('day', '<=', '2000-02-28').delete()
+    }
+  }).timeout(60_000)
 })

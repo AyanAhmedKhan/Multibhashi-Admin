@@ -1,5 +1,8 @@
 import vine from '@vinejs/vine'
 import { LEARNER_NAME } from '#helpers/learner_name'
+import { METRICS } from '#services/analytics/quiz_metrics'
+import { DIRECTIONS, RELEASE_KINDS, RELEASE_PHASES, RELEASE_SURFACES } from '#services/analytics/quiz_releases'
+import { FUNNELS } from '#services/product_analytics/catalog'
 
 /**
  * Every sensitive read and every write asks "why?". The reason is stored in the audit
@@ -170,5 +173,70 @@ export const listValidator = vine.compile(
     outcome: vine.enum(['success', 'denied', 'failure']).optional(),
     days: vine.number().withoutDecimals().in([7, 14, 30, 90]).optional(),
     courseId: vine.number().withoutDecimals().min(1).optional(),
+  })
+)
+
+const DAY_LABEL = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/
+
+/** A change in the quiz release log (docs/QUIZ_OBSERVABILITY.md §7). */
+export const quizReleaseValidator = vine.compile(
+  vine.object({
+    title: vine.string().trim().minLength(3).maxLength(160),
+    phase: vine.enum(RELEASE_PHASES).nullable().optional(),
+    kind: vine.enum(RELEASE_KINDS),
+    surface: vine.enum(RELEASE_SURFACES),
+    ticket: vine.string().trim().maxLength(32).nullable().optional(),
+    pr: vine.string().trim().maxLength(64).nullable().optional(),
+    commit_sha: vine.string().trim().regex(/^[0-9a-fA-F]{7,40}$/).nullable().optional(),
+    app_version: vine.string().trim().maxLength(32).nullable().optional(),
+    // ISO 8601 with an offset (the browser sends toISOString()); null = not live yet
+    deployed_at: vine
+      .string()
+      .trim()
+      .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,3})?)?(Z|[+-]\d{2}:\d{2})$/)
+      .nullable()
+      .optional(),
+    deployed_estimated: vine.boolean().optional(),
+    expects: vine
+      .array(vine.object({ metric: vine.enum(METRICS.map((m) => m.key)), direction: vine.enum(DIRECTIONS) }))
+      .maxLength(12)
+      .nullable()
+      .optional(),
+    notes: vine.string().trim().maxLength(2000).nullable().optional(),
+  })
+)
+
+export const quizReleaseDeleteValidator = vine.compile(vine.object({ reason: reason() }))
+
+/** One stored quiz metric's daily rows. */
+export const quizMetricSeriesValidator = vine.compile(
+  vine.object({
+    metric: vine.enum(METRICS.map((m) => m.key)),
+    segment: vine.string().trim().maxLength(64).optional(),
+    from: vine.string().trim().regex(DAY_LABEL),
+    to: vine.string().trim().regex(DAY_LABEL),
+  })
+)
+
+/** Insights → product analytics pages (MUL-152). */
+export const productInsightsValidator = vine.compile(
+  vine.object({
+    days: vine.number().withoutDecimals().in([7, 14, 30, 90]).optional(),
+    breakdown: vine.enum(['platform', 'channel', 'app_version'] as const).optional(),
+    funnel: vine.enum(FUNNELS.map((f) => f.key)).optional(),
+    step: vine.number().withoutDecimals().min(1).max(10).optional(),
+    basis: vine.enum(['signup', 'first_seen'] as const).optional(),
+    channel: vine.string().trim().maxLength(100).optional(),
+    feature: vine.string().trim().maxLength(40).optional(),
+  })
+)
+
+/** Before vs after one logged change. */
+export const quizImpactValidator = vine.compile(
+  vine.object({
+    release: vine.number().withoutDecimals().min(1),
+    segment: vine.string().trim().maxLength(64).optional(),
+    window: vine.number().withoutDecimals().in([14, 28, 56]).optional(),
+    skip: vine.number().withoutDecimals().min(0).max(7).optional(),
   })
 )

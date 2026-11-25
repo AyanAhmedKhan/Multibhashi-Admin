@@ -6,6 +6,7 @@ import { OpenAiUsageClient, type FetchLike } from '#services/analytics/openai_us
 import { BillingReader, bigQueryClient, validTables, type BigQueryLike } from '#services/analytics/gcp_billing'
 import { ProviderError, type ProviderRow } from '#services/analytics/provider_types'
 import { TUTOR_GEMINI_PROJECT, describeRules, type AttributionRules } from '#services/analytics/cost_attribution'
+import { parseCredentials, type GoogleCredentials } from '#helpers/gcp_credentials'
 
 /**
  * Pulls the providers' own daily usage and billing into console_ai_provider_daily
@@ -24,11 +25,7 @@ export const MAX_SYNC_DAYS = 90
 
 type Get = (key: string) => string | undefined
 
-export interface GoogleCredentials {
-  project_id?: string
-  client_email?: string
-  private_key?: string
-}
+export type { GoogleCredentials }
 
 export interface ProviderConfig {
   /** projectIds / apiKeyIds: the quiz backend's, an attribution rule (not a sync filter). */
@@ -55,15 +52,6 @@ export interface ProviderRunStatus {
 export type SyncStatus = Partial<Record<'openai' | 'google', ProviderRunStatus>>
 
 const list = (v: string | undefined) => (v ?? '').split(',').map((s) => s.trim()).filter(Boolean)
-
-function parseCredentials(raw: string): GoogleCredentials {
-  const attempt = (text: string) => JSON.parse(text) as GoogleCredentials
-  try {
-    return attempt(raw)
-  } catch {
-    return attempt(Buffer.from(raw, 'base64').toString('utf8'))
-  }
-}
 
 /** What is configured, and what is missing (by env name only). */
 export async function readProviderConfig(get: Get = (k) => env.get(k as never) as string | undefined): Promise<ProviderConfig> {

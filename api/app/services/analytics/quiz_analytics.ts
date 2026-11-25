@@ -1,5 +1,6 @@
 import db from '@adonisjs/lucid/services/db'
-import { istDayLabel, istDayOf, istDayStart } from '#helpers/ist'
+import { DAY_MS, istDayLabel, istDayOf, istDayStart } from '#helpers/ist'
+import type { AttemptRow, MetricEvent } from '#services/analytics/quiz_metrics'
 
 /**
  * Quizzes, read-only from what the quiz backend (teachers-dashboard, unchanged) and the app
@@ -87,6 +88,13 @@ export interface AnswerRow {
   failReason: string | null
   /** Marking failed: evaluation_status = failed, or no score came back for a non-empty answer. */
   failed: boolean
+}
+
+export interface AnswerSource {
+  context: Context
+  label: string
+  present: boolean
+  lsrw: boolean
 }
 
 export interface QuizSchema {
@@ -237,6 +245,7 @@ class QuizAnalytics {
       'quizzes',
       'quiz_ai_evaluation_cache',
       'student_activity_events',
+      'student_sessions',
       'course_lessons',
     ]
     const rows = await conn()
@@ -256,104 +265,256 @@ class QuizAnalytics {
     return value
   }
 
-  /** Every SQ/WQ answer since `sinceMs` (numbers only), across the three delivery tables. */
-  answers(days: number): Promise<{ rows: AnswerRow[]; sources: { context: Context; label: string; present: boolean; lsrw: boolean }[] }> {
-    return this.cached(`answers:${days}`, async () => {
-      const schema = await this.schema()
-      const since = new Date(istDayStart(istDayOf(Date.now()) - days + 1))
-      const out: AnswerRow[] = []
-      const sources = []
-      for (const t of DETAIL_TABLES) {
-        const present = schema.has(t.details) && schema.has(t.logs) && schema.has('quiz_questions') && schema.has(t.details, t.fk) && schema.has(t.details, 'answer')
-        const has = (c: string) => schema.has(t.details, c)
-        const lsrw = present && has('scoring_version')
-        sources.push({ context: t.context, label: t.label, present, lsrw })
-        if (!present) continue
-        const opt = (c: string, alias = c) => (has(c) ? `d.${c} AS ${alias}` : `NULL AS ${alias}`)
-        const select = [
-          'd.id AS id',
-          `d.${t.fk} AS log_id`,
-          'l.user_id AS user_id',
-          'l.quiz_id AS quiz_id',
-          'd.quiz_question_id AS question_id',
-          'q.type_code AS type_code',
-          opt('question_start_timestamp', 'start_ms'),
-          opt('question_end_timestamp', 'end_ms'),
-          `DATE_FORMAT(d.created_at, '%Y-%m-%d') AS created_day`,
-          `${wordsSql('d.answer')} AS words`,
-          `${marksSql('d.answer')} AS marks`,
-          `CHAR_LENGTH(TRIM(COALESCE(d.answer, ''))) AS chars`,
-          opt('relevance_score'),
-          opt('grammar_score'),
-          opt('pronunciation_score'),
-          opt('final_percentage'),
-          opt('is_correct'),
-          opt('finished_on_time'),
-          opt('time_taken'),
-          opt('scoring_version'),
-          opt('prompt_version'),
-          opt('model_name'),
-          opt('evaluation_status'),
-          has('evaluation_json') ? `${json('d.evaluation_json', '$.evidence_review.diagnostics[*].stage')} AS review_stages` : 'NULL AS review_stages',
-          has('evaluation_json') ? `${json('d.evaluation_json', '$.diagnostics[*].stage')} AS fail_stages` : 'NULL AS fail_stages',
-          has('evaluation_json') ? `${jsonText('d.evaluation_json', '$.reason')} AS fail_reason` : 'NULL AS fail_reason',
-        ]
-        const firstId = await this.firstIdSince(t.details, since)
-        if (firstId === null) continue
-        const rows = await conn().rawQuery(
-          `SELECT ${select.join(', ')}
-           FROM ${t.details} d
-           JOIN ${t.logs} l ON l.id = d.${t.fk}
-           JOIN quiz_questions q ON q.id = d.quiz_question_id
-           WHERE d.id >= ? AND q.type_code IN ('SQ', 'WQ') AND d.created_at >= ?`,
-          [firstId, since]
-        )
-        for (const r of rows[0] as Record<string, unknown>[]) {
-          const endMs = numOrNull(r.end_ms)
-          const startMs = numOrNull(r.start_ms)
-          const validEnd = endMs !== null && endMs > 1e12 ? endMs : null
-          const words = n(r.words)
-          const scoringVersion = numOrNull(r.scoring_version)
-          const promptVersion = (r.prompt_version as string) ?? null
-          const path = markingPath(scoringVersion, promptVersion)
-          const stages = [...stagesOf(r.review_stages), ...stagesOf(r.fail_stages)]
-          const status = (r.evaluation_status as string) ?? null
-          const relevance = numOrNull(r.relevance_score)
-          const grammar = numOrNull(r.grammar_score)
+  /** Every SQ/WQ answer of the last `days` IST days (numbers only), across the three delivery tables. */
+  answers(days: number): Promise<{ rows: AnswerRow[]; sources: AnswerSource[] }> {
+    return this.cached(`answers:${days}`, () => this.loadAnswers(new Date(istDayStart(istDayOf(Date.now()) - days + 1)), null))
+  }
+
+  /**
+   * Answers saved on IST days [fromDay, toDay) (day numbers), for the daily metrics job.
+   * Rows are read with a day of margin on each side, because an answer's day comes from its
+   * end timestamp and the filter is on created_at; the caller keeps the days it asked for.
+   * Not cached: the job reads each window once.
+   */
+  answersBetween(fromDay: number, toDay: number) {
+    return this.loadAnswers(new Date(istDayStart(fromDay) - DAY_MS), new Date(istDayStart(toDay) + DAY_MS))
+  }
+
+  private async loadAnswers(since: Date, until: Date | null): Promise<{ rows: AnswerRow[]; sources: AnswerSource[] }> {
+    const schema = await this.schema()
+    const out: AnswerRow[] = []
+    const sources = []
+    for (const t of DETAIL_TABLES) {
+      const present = schema.has(t.details) && schema.has(t.logs) && schema.has('quiz_questions') && schema.has(t.details, t.fk) && schema.has(t.details, 'answer')
+      const has = (c: string) => schema.has(t.details, c)
+      const lsrw = present && has('scoring_version')
+      sources.push({ context: t.context, label: t.label, present, lsrw })
+      if (!present) continue
+      const opt = (c: string, alias = c) => (has(c) ? `d.${c} AS ${alias}` : `NULL AS ${alias}`)
+      const select = [
+        'd.id AS id',
+        `d.${t.fk} AS log_id`,
+        'l.user_id AS user_id',
+        'l.quiz_id AS quiz_id',
+        'd.quiz_question_id AS question_id',
+        'q.type_code AS type_code',
+        opt('question_start_timestamp', 'start_ms'),
+        opt('question_end_timestamp', 'end_ms'),
+        `DATE_FORMAT(d.created_at, '%Y-%m-%d') AS created_day`,
+        `${wordsSql('d.answer')} AS words`,
+        `${marksSql('d.answer')} AS marks`,
+        `CHAR_LENGTH(TRIM(COALESCE(d.answer, ''))) AS chars`,
+        opt('relevance_score'),
+        opt('grammar_score'),
+        opt('pronunciation_score'),
+        opt('final_percentage'),
+        opt('is_correct'),
+        opt('finished_on_time'),
+        opt('time_taken'),
+        opt('scoring_version'),
+        opt('prompt_version'),
+        opt('model_name'),
+        opt('evaluation_status'),
+        has('evaluation_json') ? `${json('d.evaluation_json', '$.evidence_review.diagnostics[*].stage')} AS review_stages` : 'NULL AS review_stages',
+        has('evaluation_json') ? `${json('d.evaluation_json', '$.diagnostics[*].stage')} AS fail_stages` : 'NULL AS fail_stages',
+        has('evaluation_json') ? `${jsonText('d.evaluation_json', '$.reason')} AS fail_reason` : 'NULL AS fail_reason',
+      ]
+      const firstId = await this.firstIdSince(t.details, since)
+      if (firstId === null) continue
+      const rows = await conn().rawQuery(
+        `SELECT ${select.join(', ')}
+         FROM ${t.details} d
+         JOIN ${t.logs} l ON l.id = d.${t.fk}
+         JOIN quiz_questions q ON q.id = d.quiz_question_id
+         WHERE d.id >= ? AND q.type_code IN ('SQ', 'WQ') AND d.created_at >= ?${until ? ' AND d.created_at < ?' : ''}`,
+        until ? [firstId, since, until] : [firstId, since]
+      )
+      for (const r of rows[0] as Record<string, unknown>[]) {
+        const endMs = numOrNull(r.end_ms)
+        const startMs = numOrNull(r.start_ms)
+        const validEnd = endMs !== null && endMs > 1e12 ? endMs : null
+        const words = n(r.words)
+        const scoringVersion = numOrNull(r.scoring_version)
+        const promptVersion = (r.prompt_version as string) ?? null
+        const path = markingPath(scoringVersion, promptVersion)
+        const stages = [...stagesOf(r.review_stages), ...stagesOf(r.fail_stages)]
+        const status = (r.evaluation_status as string) ?? null
+        const relevance = numOrNull(r.relevance_score)
+        const grammar = numOrNull(r.grammar_score)
+        out.push({
+          key: `${t.context}:${n(r.id)}`,
+          context: t.context,
+          id: n(r.id),
+          logId: n(r.log_id),
+          userId: n(r.user_id),
+          quizId: n(r.quiz_id),
+          questionId: n(r.question_id),
+          type: r.type_code === 'SQ' ? 'SQ' : 'WQ',
+          day: validEnd ? istDayLabel(istDayOf(validEnd)) : String(r.created_day),
+          startMs: startMs !== null && startMs > 1e12 ? startMs : null,
+          endMs: validEnd,
+          words,
+          sentences: sentencesFrom(words, n(r.marks)),
+          chars: n(r.chars),
+          relevance,
+          grammar,
+          pronunciation: numOrNull(r.pronunciation_score),
+          finalPercentage: numOrNull(r.final_percentage),
+          isCorrect: boolOrNull(r.is_correct),
+          onTime: boolOrNull(r.finished_on_time),
+          timeTaken: numOrNull(r.time_taken),
+          path,
+          scoringVersion,
+          promptVersion,
+          model: (r.model_name as string) ?? null,
+          evaluationStatus: status,
+          attempts: path === 'evidence' ? attemptsFrom(stages) : 1,
+          failReason: status === 'failed' ? (reasonCode(r.fail_reason) ?? 'unknown') : null,
+          failed: status === 'failed' || (words > 0 && relevance === null && grammar === null),
+        })
+      }
+    }
+    return { rows: out, sources }
+  }
+
+  /**
+   * Quiz attempts (parent logs) with answers saved on IST days [fromDay, toDay), for the daily
+   * metrics job: answered count, SQ/WQ count, finished, and whether the last saved answer ran
+   * out of time. Answers of every question type count here, not only SQ/WQ. The caller keeps
+   * the attempts whose start day it asked for.
+   */
+  async attemptsBetween(fromDay: number, toDay: number): Promise<AttemptRow[]> {
+    const schema = await this.schema()
+    const since = new Date(istDayStart(fromDay) - DAY_MS)
+    const until = new Date(istDayStart(toDay) + DAY_MS)
+    const out: AttemptRow[] = []
+    for (const t of DETAIL_TABLES) {
+      if (!schema.has(t.details) || !schema.has(t.logs) || !schema.has('quiz_questions') || !schema.has(t.details, t.fk)) continue
+      const firstId = await this.firstIdSince(t.details, since)
+      if (firstId === null) continue
+      const grouped = await conn().rawQuery(
+        `SELECT d.${t.fk} AS log_id, COUNT(*) AS answered, MAX(d.id) AS last_id, SUM(q.type_code IN ('SQ', 'WQ')) AS sw
+         FROM ${t.details} d
+         JOIN quiz_questions q ON q.id = d.quiz_question_id
+         WHERE d.id >= ? AND d.created_at >= ? AND d.created_at < ?
+         GROUP BY d.${t.fk}`,
+        [firstId, since, until]
+      )
+      const byLog = new Map<number, { answered: number; lastId: number; sw: number }>()
+      for (const r of grouped[0] as Record<string, unknown>[]) byLog.set(n(r.log_id), { answered: n(r.answered), lastId: n(r.last_id), sw: n(r.sw) })
+      const logIds = [...byLog.keys()]
+      const hasStart = schema.has(t.logs, 'quiz_start_timestamp')
+      const hasOnTime = schema.has(t.details, 'finished_on_time')
+      for (let i = 0; i < logIds.length; i += 1000) {
+        const ids = logIds.slice(i, i + 1000)
+        const logs = await conn()
+          .from(t.logs)
+          .whereIn('id', ids)
+          .select(
+            'id',
+            'user_id',
+            'quiz_id',
+            'is_quiz_finised',
+            hasStart ? 'quiz_start_timestamp' : conn().raw('NULL AS quiz_start_timestamp'),
+            conn().raw(`DATE_FORMAT(created_at, '%Y-%m-%d') AS created_day`)
+          )
+        const lastIds = ids.map((id) => byLog.get(id)!.lastId)
+        const last = new Map<number, boolean | null>()
+        if (hasOnTime) {
+          for (const r of await conn().from(t.details).whereIn('id', lastIds).select('id', 'finished_on_time')) {
+            last.set(n(r.id), boolOrNull(r.finished_on_time) === null ? null : boolOrNull(r.finished_on_time) === false)
+          }
+        }
+        for (const l of logs as Record<string, unknown>[]) {
+          const g = byLog.get(n(l.id))!
+          const startMs = numOrNull(l.quiz_start_timestamp)
+          const validStart = startMs !== null && startMs > 1e12 ? startMs : null
           out.push({
-            key: `${t.context}:${n(r.id)}`,
+            key: `${t.context}:${n(l.id)}`,
             context: t.context,
-            id: n(r.id),
-            logId: n(r.log_id),
-            userId: n(r.user_id),
-            quizId: n(r.quiz_id),
-            questionId: n(r.question_id),
-            type: r.type_code === 'SQ' ? 'SQ' : 'WQ',
-            day: validEnd ? istDayLabel(istDayOf(validEnd)) : String(r.created_day),
-            startMs: startMs !== null && startMs > 1e12 ? startMs : null,
-            endMs: validEnd,
-            words,
-            sentences: sentencesFrom(words, n(r.marks)),
-            chars: n(r.chars),
-            relevance,
-            grammar,
-            pronunciation: numOrNull(r.pronunciation_score),
-            finalPercentage: numOrNull(r.final_percentage),
-            isCorrect: boolOrNull(r.is_correct),
-            onTime: boolOrNull(r.finished_on_time),
-            timeTaken: numOrNull(r.time_taken),
-            path,
-            scoringVersion,
-            promptVersion,
-            model: (r.model_name as string) ?? null,
-            evaluationStatus: status,
-            attempts: path === 'evidence' ? attemptsFrom(stages) : 1,
-            failReason: status === 'failed' ? (reasonCode(r.fail_reason) ?? 'unknown') : null,
-            failed: status === 'failed' || (words > 0 && relevance === null && grammar === null),
+            logId: n(l.id),
+            userId: n(l.user_id),
+            quizId: n(l.quiz_id),
+            day: validStart ? istDayLabel(istDayOf(validStart)) : String(l.created_day),
+            startMs: validStart,
+            finished: boolOrNull(l.is_quiz_finised) === true,
+            answered: g.answered,
+            speakingWriting: g.sw,
+            lastTimedOut: last.get(g.lastId) ?? null,
           })
         }
       }
-      return { rows: out, sources }
+    }
+    return out
+  }
+
+  /**
+   * Every quiz event (including shown and paste-blocked) created in [fromMs, toMs), with the
+   * activity session's device and app version, for the daily metrics job. Codes and numbers
+   * from metadata only.
+   */
+  async metricEventsBetween(fromMs: number, toMs: number): Promise<MetricEvent[]> {
+    const schema = await this.schema()
+    if (!schema.has('student_activity_events')) return []
+    const has = (c: string) => schema.has('student_activity_events', c)
+    const meta = has('metadata')
+    const m = (path: string, alias: string) => (meta ? `${jsonText('e.metadata', `$.${path}`)} AS ${alias}` : `NULL AS ${alias}`)
+    const sessions = schema.has('student_sessions') && has('student_session_id')
+    const rows = await conn().rawQuery(
+      `SELECT e.event_type, e.user_id, ${has('user_quiz_log_id') ? 'e.user_quiz_log_id' : 'NULL'} AS log_id, e.resource_id, e.created_at_ms, e.duration_sec,
+         ${m('error', 'm_error')}, ${m('reason', 'm_reason')}, ${m('outcome', 'm_outcome')}, ${m('stage', 'm_stage')},
+         ${m('ms', 'm_ms')}, ${m('seconds', 'm_seconds')}, ${m('timed_out', 'm_timed_out')}, ${m('had_answer', 'm_had_answer')},
+         ${m('question_id', 'm_question_id')}, ${m('question_type', 'm_question_type')}, ${m('os', 'm_os')}, ${m('in_app', 'm_in_app')},
+         ${sessions && schema.has('student_sessions', 'device') ? 's.device' : 'NULL'} AS device,
+         ${sessions && schema.has('student_sessions', 'app_version') ? 's.app_version' : 'NULL'} AS app_version
+       FROM student_activity_events e
+       ${sessions ? 'LEFT JOIN student_sessions s ON s.id = e.student_session_id' : ''}
+       WHERE e.event_type IN (${QUIZ_EVENTS.map(() => '?').join(', ')}) AND e.created_at_ms >= ? AND e.created_at_ms < ?`,
+      [...QUIZ_EVENTS, fromMs, toMs]
+    )
+    const text = (v: unknown, max = 60) => (v === null || v === undefined || v === 'null' ? null : String(v).slice(0, max))
+    return (rows[0] as Record<string, unknown>[]).map((r) => ({
+      type: String(r.event_type),
+      userId: n(r.user_id),
+      logId: numOrNull(r.log_id),
+      questionId: numOrNull(r.m_question_id) ?? numOrNull(r.resource_id),
+      at: n(r.created_at_ms),
+      durationSec: numOrNull(r.duration_sec),
+      error: text(r.m_error),
+      reason: text(r.m_reason, 24),
+      outcome: text(r.m_outcome, 24),
+      stage: text(r.m_stage, 24),
+      ms: numOrNull(r.m_ms),
+      seconds: numOrNull(r.m_seconds),
+      timedOut: r.m_timed_out === null || r.m_timed_out === undefined ? null : boolOrNull(r.m_timed_out),
+      hadAnswer: r.m_had_answer === null || r.m_had_answer === undefined ? null : boolOrNull(r.m_had_answer),
+      questionType: text(r.m_question_type, 16),
+      device: text(r.device, 16),
+      appVersion: text(r.app_version, 32),
+      os: text(r.m_os, 16),
+      inApp: boolOrNull(r.m_in_app) === true,
+    }))
+  }
+
+  /**
+   * quiz_start events in [fromMs, toMs) with their session's device and app version. They carry
+   * no attempt id, so the job matches an attempt to its learner's nearest earlier start of the
+   * same quiz (deviceMatcher in quiz_metrics_store.ts).
+   */
+  async quizStartsBetween(fromMs: number, toMs: number) {
+    const schema = await this.schema()
+    if (!schema.has('student_activity_events') || !schema.has('student_sessions') || !schema.has('student_activity_events', 'student_session_id')) return []
+    const rows = await conn().rawQuery(
+      `SELECT e.user_id, e.resource_id, e.created_at_ms, s.device, ${schema.has('student_sessions', 'app_version') ? 's.app_version' : 'NULL'} AS app_version
+       FROM student_activity_events e
+       JOIN student_sessions s ON s.id = e.student_session_id
+       WHERE e.event_type = 'quiz_start' AND e.created_at_ms >= ? AND e.created_at_ms < ?`,
+      [fromMs, toMs]
+    )
+    return (rows[0] as Record<string, unknown>[]).flatMap((r) => {
+      const quizId = numOrNull(r.resource_id)
+      if (quizId === null) return []
+      return [{ userId: n(r.user_id), quizId, at: n(r.created_at_ms), device: r.device ? String(r.device).slice(0, 16) : null, appVersion: r.app_version ? String(r.app_version).slice(0, 32) : null }]
     })
   }
 

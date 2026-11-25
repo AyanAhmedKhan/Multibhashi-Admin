@@ -87,6 +87,25 @@ const env = await Env.create(new URL('../', import.meta.url), {
   GCP_BILLING_EXPORT_TABLE: Env.schema.string.optional(),
   // Attribution: the project quiz speech-to-text is billed to (multibhashi-android-app).
   GCP_SPEECH_PROJECT_ID: Env.schema.string.optional(),
+
+  /*
+  |----------------------------------------------------------
+  | Product analytics (docs/PRODUCT_ANALYTICS.md, MUL-125): the BigQuery dataset the app's
+  | collector writes events into (asia-south1). The console exports the business facts, builds
+  | the nightly models and reads them on Insights. All optional: without them the product
+  | analytics tabs say "not connected yet" and the analytics:* commands do nothing.
+  |----------------------------------------------------------
+  */
+  // The GCP project that holds the dataset and runs the jobs.
+  GCP_ANALYTICS_PROJECT: Env.schema.string.optional(),
+  // Default product_analytics.
+  GCP_ANALYTICS_DATASET: Env.schema.string.optional(),
+  // Service account (BigQuery Data Editor on the dataset + BigQuery Job User on the project):
+  // the JSON itself (raw or base64) or a path to the key file.
+  GCP_ANALYTICS_CREDENTIALS_JSON: Env.schema.string.optional(),
+  GCP_ANALYTICS_CREDENTIALS_FILE: Env.schema.string.optional(),
+  // Who gets the Monday digest (analytics:weekly-digest): comma-separated e-mail addresses.
+  ANALYTICS_DIGEST_TO: Env.schema.string.optional(),
 })
 
 if (env.get('NODE_ENV') === 'production') {
